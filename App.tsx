@@ -1,20 +1,221 @@
+import React, { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { OnboardingScreen } from './src/screens/onboarding/OnboardingScreen';
+import { LoginScreen } from './src/screens/auth/LoginScreen';
+import { RegisterScreen } from './src/screens/auth/RegisterScreen';
+import { OtpScreen } from './src/screens/auth/OtpScreen';
+import { ForgotPasswordScreen } from './src/screens/auth/ForgotPasswordScreen';
+import { ResetPasswordScreen } from './src/screens/auth/ResetPasswordScreen';
+import { DashboardScreen } from './src/screens/dashboard/DashboardScreen';
+import { BuyNumberScreen } from './src/screens/numbers/BuyNumberScreen';
+import { MyNumbersScreen } from './src/screens/numbers/MyNumbersScreen';
+import { RentalsScreen } from './src/screens/rentals/RentalsScreen';
+import { WalletScreen } from './src/screens/wallet/WalletScreen';
+import { MoreScreen } from './src/screens/more/MoreScreen';
+import { View, Text, StyleSheet } from 'react-native';
+import { Button } from './src/components/ui/Button';
+import { Logo } from './src/components/ui/Logo';
+import { useTheme } from './src/theme';
+
+type AuthStep =
+  | 'onboarding'
+  | 'login'
+  | 'register'
+  | 'otp'
+  | 'forgot'
+  | 'reset'
+  | 'dashboard';
+
+type AuthenticatedScreen = 'dashboard' | 'buy-number' | 'numbers' | 'wallet' | 'rentals' | 'more';
+
+interface OtpState {
+  email: string;
+  type: 'login' | 'register' | 'forgot';
+  twoFactorMethod?: string;
+}
+
+function MainNavigator() {
+  const { isAuthenticated, user, logout } = useAuth();
+  const { colors, typography, spacing } = useTheme();
+
+  const [currentStep, setCurrentStep] = useState<AuthStep>('onboarding');
+  const [activeAppScreen, setActiveAppScreen] = useState<AuthenticatedScreen>('dashboard');
+  const [otpParams, setOtpParams] = useState<OtpState>({ email: '', type: 'register' });
+  const [resetEmail, setResetEmail] = useState('');
+
+  // If already authenticated, show the rich app screens
+  if (isAuthenticated && user) {
+    if (activeAppScreen === 'buy-number') {
+      return (
+        <BuyNumberScreen
+          onBack={() => setActiveAppScreen('dashboard')}
+          onNavigateToHome={() => setActiveAppScreen('dashboard')}
+          onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+          onNavigateToRentals={() => setActiveAppScreen('rentals')}
+          onNavigateToWallet={() => setActiveAppScreen('wallet')}
+        />
+      );
+    }
+
+    if (activeAppScreen === 'numbers') {
+      return (
+        <MyNumbersScreen
+          onBack={() => setActiveAppScreen('dashboard')}
+          onNavigateToHome={() => setActiveAppScreen('dashboard')}
+          onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+          onNavigateToRentals={() => setActiveAppScreen('rentals')}
+          onNavigateToWallet={() => setActiveAppScreen('wallet')}
+        />
+      );
+    }
+
+    if (activeAppScreen === 'rentals') {
+      return (
+        <RentalsScreen
+          onBack={() => setActiveAppScreen('dashboard')}
+          onNavigateToHome={() => setActiveAppScreen('dashboard')}
+          onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+          onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+          onNavigateToWallet={() => setActiveAppScreen('wallet')}
+        />
+      );
+    }
+
+    if (activeAppScreen === 'wallet') {
+      return (
+        <WalletScreen
+          onBack={() => setActiveAppScreen('dashboard')}
+          onNavigateToHome={() => setActiveAppScreen('dashboard')}
+          onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+          onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+          onNavigateToRentals={() => setActiveAppScreen('rentals')}
+        />
+      );
+    }
+
+    if (activeAppScreen === 'more') {
+      return (
+        <MoreScreen
+          onBack={() => setActiveAppScreen('dashboard')}
+          onNavigateToHome={() => setActiveAppScreen('dashboard')}
+          onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+          onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+          onNavigateToRentals={() => setActiveAppScreen('rentals')}
+          onNavigateToWallet={() => setActiveAppScreen('wallet')}
+        />
+      );
+    }
+
+    return (
+      <DashboardScreen
+        onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+        onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+        onNavigateToWallet={() => setActiveAppScreen('wallet')}
+        onNavigateToRentals={() => setActiveAppScreen('rentals')}
+        onNavigateToMore={() => setActiveAppScreen('more')}
+      />
+    );
+  }
+
+  // Auth routing
+  switch (currentStep) {
+    case 'onboarding':
+      return (
+        <OnboardingScreen
+          onComplete={(action) => {
+            if (action === 'register') {
+              setCurrentStep('register');
+            } else {
+              setCurrentStep('login');
+            }
+          }}
+        />
+      );
+
+    case 'login':
+      return (
+        <LoginScreen
+          onNavigateToRegister={() => setCurrentStep('register')}
+          onNavigateToForgot={() => setCurrentStep('forgot')}
+          onNavigateToOtp={({ email, type, twoFactorMethod }) => {
+            setOtpParams({ email, type, twoFactorMethod });
+            setCurrentStep('otp');
+          }}
+          onLoginSuccess={() => setCurrentStep('dashboard')}
+        />
+      );
+
+    case 'register':
+      return (
+        <RegisterScreen
+          onNavigateToLogin={() => setCurrentStep('login')}
+          onNavigateToOtp={({ email, type }) => {
+            setOtpParams({ email, type });
+            setCurrentStep('otp');
+          }}
+        />
+      );
+
+    case 'otp':
+      return (
+        <OtpScreen
+          email={otpParams.email}
+          type={otpParams.type}
+          twoFactorMethod={otpParams.twoFactorMethod}
+          onSuccess={() => setCurrentStep('dashboard')}
+          onBackToLogin={() => setCurrentStep('login')}
+        />
+      );
+
+    case 'forgot':
+      return (
+        <ForgotPasswordScreen
+          onNavigateToReset={(email) => {
+            setResetEmail(email);
+            setCurrentStep('reset');
+          }}
+          onBackToLogin={() => setCurrentStep('login')}
+        />
+      );
+
+    case 'reset':
+      return (
+        <ResetPasswordScreen
+          email={resetEmail}
+          onResetSuccess={() => setCurrentStep('login')}
+          onBackToLogin={() => setCurrentStep('login')}
+        />
+      );
+
+    default:
+      return null;
+  }
+}
 
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <StatusBar style="auto" />
+        <MainNavigator />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  centerContainer: {
     flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
+  },
+  balanceCard: {
+    width: '100%',
+    padding: 24,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
   },
 });
