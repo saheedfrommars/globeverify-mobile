@@ -45,7 +45,7 @@ export const OtpScreen: React.FC<OtpScreenProps> = ({
   const [resending, setResending] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const inputRefs = useRef<(TextInput | null)[]>([]);
+  const inputRefs = useRef<any[]>([]);
 
   const isAuthenticator = twoFactorMethod === 'authenticator';
   const isLogin = type === 'login';

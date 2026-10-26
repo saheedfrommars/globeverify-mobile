@@ -1,7 +1,11 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import type { ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import apiClient, { setOnUnauthorizedCallback } from '../api/client';
+import apiClient, {
+  setOnUnauthorizedCallback,
+  setCachedAuthToken,
+} from '../api/client';
+import { socketService } from '../services/socketService';
 
 export interface User {
   _id: string;
@@ -25,6 +29,16 @@ export interface User {
   developerStatus?: string;
   createdAt?: string;
   authProvider?: string;
+  isGoogleLinked?: boolean;
+  isTelegramLinked?: boolean;
+  telegramId?: string;
+  telegramUsername?: string;
+  telegramFirstName?: string;
+  telegramLinkedAt?: string;
+  accountDeletion?: {
+    status?: 'none' | 'pending' | string;
+    scheduledFor?: string;
+  };
 }
 
 interface AuthContextType {
@@ -35,6 +49,7 @@ interface AuthContextType {
   login: (token: string, userData: User) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  updateUser: (updated: Partial<User>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -52,20 +67,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const storedUser = await SecureStore.getItemAsync('gv_user_data');
 
         if (storedToken && storedUser) {
+          setCachedAuthToken(storedToken);
           setToken(storedToken);
           setUser(JSON.parse(storedUser));
+          // Unblock app launch immediately (critical for offline & fast startup!)
+          setLoading(false);
 
-          // Fetch fresh profile in the background
-          try {
-            const res = await apiClient.get('/auth/profile');
-            const profileUser = res.data?.user || (res.data?._id ? res.data : null);
-            if (profileUser) {
-              setUser(profileUser);
-              await SecureStore.setItemAsync('gv_user_data', JSON.stringify(profileUser));
-            }
-          } catch (profileErr) {
-            console.log('[AuthContext] Background profile refresh skipped:', profileErr);
-          }
+          // Fetch fresh profile non-blockingly in the background
+          apiClient
+            .get('/auth/profile', { timeout: 6000 })
+            .then(async (res) => {
+              const profileUser = res.data?.user || (res.data?._id ? res.data : null);
+              if (profileUser) {
+                setUser(profileUser);
+                await SecureStore.setItemAsync('gv_user_data', JSON.stringify(profileUser));
+              }
+            })
+            .catch(() => {
+              // Offline or slow network — keep cached user profile seamlessly
+            });
+          return;
         }
       } catch (err) {
         console.warn('[AuthContext] Error loading session:', err);
@@ -78,6 +99,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Register 401 callback
     setOnUnauthorizedCallback(() => {
+      setCachedAuthToken(null);
       setToken(null);
       setUser(null);
     });
@@ -89,6 +111,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
 
+    setCachedAuthToken(newToken);
     setToken(newToken);
     if (userData && typeof userData === 'object') {
       setUser(userData);
@@ -105,6 +128,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logout = async () => {
+    socketService.disconnect();
+    setCachedAuthToken(null);
     setToken(null);
     setUser(null);
     try {
@@ -114,6 +139,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.warn('[AuthContext] Error removing token from SecureStore:', err);
     }
   };
+
+  // Connect real-time Socket.IO whenever authenticated user is present
+  useEffect(() => {
+    const uid = user?._id || user?.id;
+    if (token && uid) {
+      socketService.connect(uid);
+    } else {
+      socketService.disconnect();
+    }
+  }, [token, user?._id, user?.id]);
 
   const refreshUser = async () => {
     try {
@@ -128,6 +163,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const updateUser = async (updated: Partial<User>) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const merged = { ...prev, ...updated };
+      SecureStore.setItemAsync('gv_user_data', JSON.stringify(merged)).catch(() => {});
+      return merged;
+    });
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -138,6 +182,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         login,
         logout,
         refreshUser,
+        updateUser,
       }}
     >
       {children}

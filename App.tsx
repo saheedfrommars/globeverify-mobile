@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { WalletSettingsProvider } from './src/context/WalletSettingsContext';
 import { OnboardingScreen } from './src/screens/onboarding/OnboardingScreen';
 import { LoginScreen } from './src/screens/auth/LoginScreen';
 import { RegisterScreen } from './src/screens/auth/RegisterScreen';
@@ -14,6 +15,11 @@ import { MyNumbersScreen } from './src/screens/numbers/MyNumbersScreen';
 import { RentalsScreen } from './src/screens/rentals/RentalsScreen';
 import { WalletScreen } from './src/screens/wallet/WalletScreen';
 import { MoreScreen } from './src/screens/more/MoreScreen';
+import { CustomizationScreen } from './src/screens/customization/CustomizationScreen';
+import { AffiliateScreen } from './src/screens/affiliate/AffiliateScreen';
+import { DeveloperScreen } from './src/screens/developer/DeveloperScreen';
+import { SupportScreen } from './src/screens/support/SupportScreen';
+import { VeraSupportChat } from './src/components/ui/VeraSupportChat';
 import { View, Text, StyleSheet } from 'react-native';
 import { Button } from './src/components/ui/Button';
 import { Logo } from './src/components/ui/Logo';
@@ -28,7 +34,17 @@ type AuthStep =
   | 'reset'
   | 'dashboard';
 
-type AuthenticatedScreen = 'dashboard' | 'buy-number' | 'numbers' | 'wallet' | 'rentals' | 'more';
+type AuthenticatedScreen =
+  | 'dashboard'
+  | 'buy-number'
+  | 'numbers'
+  | 'wallet'
+  | 'rentals'
+  | 'more'
+  | 'customization'
+  | 'affiliate'
+  | 'developer'
+  | 'support';
 
 interface OtpState {
   email: string;
@@ -37,18 +53,19 @@ interface OtpState {
 }
 
 function MainNavigator() {
-  const { isAuthenticated, user, logout } = useAuth();
-  const { colors, typography, spacing } = useTheme();
+  const { isAuthenticated, user } = useAuth();
 
   const [currentStep, setCurrentStep] = useState<AuthStep>('onboarding');
   const [activeAppScreen, setActiveAppScreen] = useState<AuthenticatedScreen>('dashboard');
   const [otpParams, setOtpParams] = useState<OtpState>({ email: '', type: 'register' });
   const [resetEmail, setResetEmail] = useState('');
 
-  // If already authenticated, show the rich app screens
+  // If already authenticated, show the rich app screens wrapped with global AppSettings navigation
   if (isAuthenticated && user) {
+    let screenContent: React.ReactNode = null;
+
     if (activeAppScreen === 'buy-number') {
-      return (
+      screenContent = (
         <BuyNumberScreen
           onBack={() => setActiveAppScreen('dashboard')}
           onNavigateToHome={() => setActiveAppScreen('dashboard')}
@@ -57,10 +74,8 @@ function MainNavigator() {
           onNavigateToWallet={() => setActiveAppScreen('wallet')}
         />
       );
-    }
-
-    if (activeAppScreen === 'numbers') {
-      return (
+    } else if (activeAppScreen === 'numbers') {
+      screenContent = (
         <MyNumbersScreen
           onBack={() => setActiveAppScreen('dashboard')}
           onNavigateToHome={() => setActiveAppScreen('dashboard')}
@@ -69,10 +84,8 @@ function MainNavigator() {
           onNavigateToWallet={() => setActiveAppScreen('wallet')}
         />
       );
-    }
-
-    if (activeAppScreen === 'rentals') {
-      return (
+    } else if (activeAppScreen === 'rentals') {
+      screenContent = (
         <RentalsScreen
           onBack={() => setActiveAppScreen('dashboard')}
           onNavigateToHome={() => setActiveAppScreen('dashboard')}
@@ -81,23 +94,44 @@ function MainNavigator() {
           onNavigateToWallet={() => setActiveAppScreen('wallet')}
         />
       );
-    }
-
-    if (activeAppScreen === 'wallet') {
-      return (
+    } else if (activeAppScreen === 'wallet') {
+      screenContent = (
         <WalletScreen
           onBack={() => setActiveAppScreen('dashboard')}
           onNavigateToHome={() => setActiveAppScreen('dashboard')}
           onNavigateToBuy={() => setActiveAppScreen('buy-number')}
           onNavigateToNumbers={() => setActiveAppScreen('numbers')}
           onNavigateToRentals={() => setActiveAppScreen('rentals')}
+          onNavigateToMore={() => setActiveAppScreen('more')}
         />
       );
-    }
-
-    if (activeAppScreen === 'more') {
-      return (
+    } else if (activeAppScreen === 'more') {
+      screenContent = (
         <MoreScreen
+          onBack={() => setActiveAppScreen('dashboard')}
+          onNavigateToHome={() => setActiveAppScreen('dashboard')}
+          onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+          onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+          onNavigateToRentals={() => setActiveAppScreen('rentals')}
+          onNavigateToWallet={() => setActiveAppScreen('wallet')}
+          onNavigateToCustomization={() => setActiveAppScreen('customization')}
+        />
+      );
+    } else if (activeAppScreen === 'customization') {
+      screenContent = (
+        <CustomizationScreen
+          onBack={() => setActiveAppScreen('more')}
+          onNavigateToHome={() => setActiveAppScreen('dashboard')}
+          onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+          onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+          onNavigateToRentals={() => setActiveAppScreen('rentals')}
+          onNavigateToWallet={() => setActiveAppScreen('wallet')}
+          onNavigateToSettings={() => setActiveAppScreen('more')}
+        />
+      );
+    } else if (activeAppScreen === 'affiliate') {
+      screenContent = (
+        <AffiliateScreen
           onBack={() => setActiveAppScreen('dashboard')}
           onNavigateToHome={() => setActiveAppScreen('dashboard')}
           onNavigateToBuy={() => setActiveAppScreen('buy-number')}
@@ -106,16 +140,50 @@ function MainNavigator() {
           onNavigateToWallet={() => setActiveAppScreen('wallet')}
         />
       );
+    } else if (activeAppScreen === 'developer') {
+      screenContent = (
+        <DeveloperScreen
+          onBack={() => setActiveAppScreen('dashboard')}
+          onNavigateToHome={() => setActiveAppScreen('dashboard')}
+          onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+          onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+          onNavigateToRentals={() => setActiveAppScreen('rentals')}
+          onNavigateToWallet={() => setActiveAppScreen('wallet')}
+        />
+      );
+    } else if (activeAppScreen === 'support') {
+      screenContent = (
+        <SupportScreen
+          onBack={() => setActiveAppScreen('dashboard')}
+          onNavigateToHome={() => setActiveAppScreen('dashboard')}
+          onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+          onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+          onNavigateToRentals={() => setActiveAppScreen('rentals')}
+          onNavigateToWallet={() => setActiveAppScreen('wallet')}
+        />
+      );
+    } else {
+      screenContent = (
+        <DashboardScreen
+          onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+          onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+          onNavigateToWallet={() => setActiveAppScreen('wallet')}
+          onNavigateToRentals={() => setActiveAppScreen('rentals')}
+          onNavigateToMore={() => setActiveAppScreen('more')}
+        />
+      );
     }
 
     return (
-      <DashboardScreen
-        onNavigateToBuy={() => setActiveAppScreen('buy-number')}
-        onNavigateToNumbers={() => setActiveAppScreen('numbers')}
-        onNavigateToWallet={() => setActiveAppScreen('wallet')}
-        onNavigateToRentals={() => setActiveAppScreen('rentals')}
-        onNavigateToMore={() => setActiveAppScreen('more')}
-      />
+      <WalletSettingsProvider
+        activeScreen={activeAppScreen}
+        onNavigateScreen={(scr) => setActiveAppScreen(scr)}
+      >
+        <View style={{ flex: 1 }}>
+          {screenContent}
+          <VeraSupportChat />
+        </View>
+      </WalletSettingsProvider>
     );
   }
 

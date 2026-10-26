@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,14 +8,14 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
-  StatusBar,
+  Animated,
+  Easing,
   Platform,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import {
-  ChevronLeft,
   RefreshCw,
   Copy,
   Check,
@@ -23,21 +23,21 @@ import {
   History,
   XCircle,
   RotateCcw,
-  Home,
-  ShoppingCart,
-  Wallet,
-  PhoneCall,
-  MessageSquare,
 } from 'lucide-react-native';
-import { useAuth } from '../../context/AuthContext';
-import apiClient from '../../api/client';
+import { useAppSettings } from '../../context/WalletSettingsContext';
+import apiClient, {
+  getMemoryCache,
+  getCachedData,
+  setCachedData,
+} from '../../api/client';
+import { socketService } from '../../services/socketService';
 import { SkeletonNumberCard } from '../../components/ui/Skeleton';
+import { AnimatedEmptyState } from '../../components/ui/AnimatedEmptyState';
 import { ModernHeader } from '../../components/navigation/ModernHeader';
 import { ModernBottomNav, NavTabId } from '../../components/navigation/ModernBottomNav';
 
-const PAD = 20;
-
-// ─── Interfaces ──────────────────────────────────────────────────────────────
+const PAD = 16;
+const LOADING_TIMEOUT_MS = 2200;
 
 export interface NumberItem {
   id: string;
@@ -57,15 +57,6 @@ export interface NumberItem {
   }>;
   purchasedAt?: string;
   expiresAt?: string;
-  autoRenew?: boolean;
-}
-
-export interface PendingOrder {
-  _id: string;
-  service: string;
-  country: string;
-  status: string;
-  createdAt: string;
 }
 
 interface MyNumbersScreenProps {
@@ -75,84 +66,6 @@ interface MyNumbersScreenProps {
   onNavigateToWallet?: () => void;
   onNavigateToRentals?: () => void;
 }
-
-// ─── Initial Fallback Orders ─────────────────────────────────────────────────
-
-const INITIAL_FALLBACK_NUMBERS: NumberItem[] = [
-  {
-    id: '6a59f8c1a18eb6c6526676fd',
-    phoneNumber: '+1 337 390 0564',
-    countryCode: 'US',
-    countryName: 'United States',
-    service: '1012',
-    serviceName: 'WhatsApp',
-    status: 'completed',
-    type: 'sms',
-    cost: 2094.4,
-    otps: [
-      {
-        code: '922703',
-        sender: 'Unknown',
-        message: 'Your WhatsApp code: 922-703. Do not share this code.',
-        receivedAt: '2026-07-17T09:44:15.000Z',
-      },
-    ],
-    purchasedAt: '2026-07-17T09:41:21.607Z',
-    expiresAt: '2026-07-19T08:53:58.523Z',
-  },
-  {
-    id: '6a5551ae5aef75ad5a19eefe',
-    phoneNumber: '+1 423 789 8422',
-    countryCode: 'US',
-    countryName: 'United States',
-    service: '1705',
-    serviceName: 'Neon Money Talks',
-    status: 'completed',
-    type: 'sms',
-    cost: 224.22,
-    otps: [
-      {
-        code: '611910',
-        sender: 'Unknown',
-        message: 'Your Neon verification code is: 611910',
-        receivedAt: '2026-07-13T21:01:30.035Z',
-      },
-    ],
-    purchasedAt: '2026-07-13T20:59:26.340Z',
-    expiresAt: '2026-07-13T21:09:26.000Z',
-  },
-  {
-    id: '6a538c4d5aef75ad5a198e5c',
-    phoneNumber: '+1 908 612 7430',
-    countryCode: 'US',
-    countryName: 'United States',
-    service: '829',
-    serviceName: 'Signal',
-    status: 'completed',
-    type: 'sms',
-    cost: 612.48,
-    otps: [
-      {
-        code: '994488',
-        sender: 'Unknown',
-        message: 'SIGNAL code: 994488. Do not share this code with anyone.',
-        receivedAt: '2026-07-12T12:46:51.327Z',
-      },
-    ],
-    purchasedAt: '2026-07-12T12:45:01.374Z',
-    expiresAt: '2026-07-12T12:55:01.000Z',
-  },
-];
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-const getCountryFlag = (code?: string): string => {
-  if (!code || code.length !== 2) return '🌐';
-  const cc = code.toUpperCase();
-  const first = cc.charCodeAt(0) - 65 + 0x1f1e6;
-  const second = cc.charCodeAt(1) - 65 + 0x1f1e6;
-  return String.fromCodePoint(first, second);
-};
 
 const cleanMessage = (msg?: string): string => {
   if (!msg) return '';
@@ -167,239 +80,6 @@ const cleanMessage = (msg?: string): string => {
     .trim();
 };
 
-const timeAgo = (dateStr?: string): string => {
-  if (!dateStr) return '';
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'Just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `${d}d ago`;
-  return `${Math.floor(d / 30)}mo ago`;
-};
-
-// ─── Simple & Pretty Number Card ─────────────────────────────────────────────
-
-const SimpleNumberCard: React.FC<{
-  num: NumberItem;
-  isHistory: boolean;
-  isActionLoading: boolean;
-  copiedKey: string | null;
-  onCopyPhone: (phone: string, id: string) => void;
-  onCopyOtp: (code: string, id: string) => void;
-  onCheckOTP: (id: string, type?: string) => void;
-  onCancel: (id: string, type?: string) => void;
-  onReuse: (id: string) => void;
-}> = ({
-  num,
-  isHistory,
-  isActionLoading,
-  copiedKey,
-  onCopyPhone,
-  onCopyOtp,
-  onCheckOTP,
-  onCancel,
-  onReuse,
-}) => {
-  const [timeLeft, setTimeLeft] = useState<string>('');
-
-  useEffect(() => {
-    if (isHistory || !num.expiresAt) return;
-    const calculateTime = () => {
-      const diff = new Date(num.expiresAt!).getTime() - Date.now();
-      if (diff <= 0) return 'Expired';
-      const mins = Math.floor(diff / 60000);
-      const secs = Math.floor((diff % 60000) / 1000);
-      return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-    };
-    setTimeLeft(calculateTime());
-    const timer = setInterval(() => setTimeLeft(calculateTime()), 1000);
-    return () => clearInterval(timer);
-  }, [num.expiresAt, isHistory]);
-
-  const flag = getCountryFlag(num.countryCode);
-  const latestOtp = num.otps?.[num.otps.length - 1];
-  const hasCode = !!latestOtp?.code;
-  const clean = cleanMessage(latestOtp?.message);
-  const isPhoneCopied = copiedKey === `phone-${num.id}`;
-  const isOtpCopied = copiedKey === `otp-${num.id}`;
-
-  return (
-    <View style={[s.card, isHistory && s.cardHistory]}>
-      {/* ── Top Header: Service + Country + Status ──────────────────── */}
-      <View style={s.cardHeader}>
-        <View style={s.serviceInfo}>
-          <Text style={s.serviceTitle} numberOfLines={1}>
-            {num.serviceName}
-          </Text>
-          <View style={s.countryRow}>
-            <Text style={s.flagEmoji}>{flag}</Text>
-            <Text style={s.countrySubtitle} numberOfLines={1}>
-              {num.countryName || num.countryCode || 'Global'}
-            </Text>
-            {num.purchasedAt && (
-              <>
-                <Text style={s.dotSep}>•</Text>
-                <Text style={s.timeAgo}>{timeAgo(num.purchasedAt)}</Text>
-              </>
-            )}
-          </View>
-        </View>
-
-        {/* Status Pill */}
-        <View style={[s.statusPill, hasCode ? s.statusPillSuccess : s.statusPillNeutral]}>
-          <View style={[s.statusDot, { backgroundColor: hasCode ? '#22C55E' : '#8E8E93' }]} />
-          <Text style={[s.statusPillText, { color: hasCode ? '#22C55E' : '#8E8E93' }]}>
-            {hasCode ? 'Received' : !isHistory ? 'Active' : num.status || 'Expired'}
-          </Text>
-        </View>
-      </View>
-
-      {/* ── Phone Number Row (Minimalist, Responsive) ───────────────── */}
-      <TouchableOpacity
-        style={s.phoneRow}
-        onPress={() => onCopyPhone(num.phoneNumber, num.id)}
-        activeOpacity={0.7}
-      >
-        <Text
-          style={s.phoneNumberText}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.85}
-        >
-          {num.phoneNumber}
-        </Text>
-
-        <View style={[s.copyBtn, isPhoneCopied && s.copyBtnSuccess]}>
-          {isPhoneCopied ? (
-            <Check size={14} color="#22C55E" />
-          ) : (
-            <Copy size={14} color="#8E8E93" />
-          )}
-          <Text style={[s.copyBtnText, isPhoneCopied && { color: '#22C55E' }]}>
-            {isPhoneCopied ? 'Copied' : 'Copy'}
-          </Text>
-        </View>
-      </TouchableOpacity>
-
-      {/* ── Expiry Timer (if active) ─────────────────────────────────── */}
-      {!isHistory && timeLeft && timeLeft !== 'Expired' && (
-        <Text style={s.expiryTimerText}>
-          Expires in <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>{timeLeft}</Text>
-        </Text>
-      )}
-
-      {/* ── Verification Code Area (Clean, Uncluttered) ──────────────── */}
-      {hasCode ? (
-        <View style={s.codeBox}>
-          <View style={s.codeTop}>
-            <Text style={s.codeLabel}>VERIFICATION CODE</Text>
-            <TouchableOpacity
-              style={[s.codeCopyPill, isOtpCopied && s.codeCopyPillDone]}
-              onPress={() => onCopyOtp(latestOtp.code, num.id)}
-              activeOpacity={0.7}
-            >
-              {isOtpCopied ? (
-                <>
-                  <Check size={12} color="#22C55E" />
-                  <Text style={[s.codeCopyText, { color: '#22C55E' }]}>Copied</Text>
-                </>
-              ) : (
-                <>
-                  <Copy size={12} color="#FFFFFF" />
-                  <Text style={s.codeCopyText}>Copy Code</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          <Text
-            style={s.codeDisplay}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.8}
-            selectable
-          >
-            {latestOtp.code}
-          </Text>
-
-          {clean ? (
-            <TouchableOpacity
-              style={s.smsTextWrap}
-              onPress={() => onCopyOtp(clean, `msg-${num.id}`)}
-              activeOpacity={0.7}
-            >
-              <Text style={s.smsMessageText} numberOfLines={2}>
-                "{clean}"
-              </Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      ) : !isHistory ? (
-        <View style={s.waitingRow}>
-          <ActivityIndicator size="small" color="#8E8E93" />
-          <Text style={s.waitingText}>Waiting for SMS verification code...</Text>
-        </View>
-      ) : null}
-
-      {/* ── Footer Actions ───────────────────────────────────────────── */}
-      <View style={s.cardActions}>
-        {!isHistory ? (
-          <>
-            <TouchableOpacity
-              style={s.actionBtnOutline}
-              onPress={() => onCheckOTP(num.id, num.type)}
-              disabled={isActionLoading}
-              activeOpacity={0.7}
-            >
-              {isActionLoading ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <>
-                  <RefreshCw size={13} color="#FFFFFF" />
-                  <Text style={s.actionBtnText}>Check SMS</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            {!hasCode && (
-              <TouchableOpacity
-                style={s.actionBtnSubtle}
-                onPress={() => onCancel(num.id, num.type)}
-                disabled={isActionLoading}
-                activeOpacity={0.7}
-              >
-                <XCircle size={13} color="#8E8E93" />
-                <Text style={s.actionBtnSubtleText}>Cancel</Text>
-              </TouchableOpacity>
-            )}
-          </>
-        ) : (
-          <TouchableOpacity
-            style={s.actionBtnOutline}
-            onPress={() => onReuse(num.id)}
-            disabled={isActionLoading}
-            activeOpacity={0.7}
-          >
-            {isActionLoading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <RotateCcw size={13} color="#FFFFFF" />
-                <Text style={s.actionBtnText}>Reuse Number</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
-    </View>
-  );
-};
-
-// ─── Main Screen Component ───────────────────────────────────────────────────
-
 export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
   onBack,
   onNavigateToBuy,
@@ -407,763 +87,946 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
   onNavigateToWallet,
   onNavigateToRentals,
 }) => {
-  const insets = useSafeAreaInsets();
+  const { settings, colors, triggerHaptic, showDialog, showToast } = useAppSettings();
 
-  const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
-  const [numbers, setNumbers] = useState<NumberItem[]>(INITIAL_FALLBACK_NUMBERS);
-  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialCachedNumbers = getMemoryCache<NumberItem[]>('my_numbers_list');
+
+  const [numbers, setNumbers] = useState<NumberItem[]>(initialCachedNumbers || []);
+  const [loading, setLoading] = useState(!initialCachedNumbers);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [expandedCardIds, setExpandedCardIds] = useState<Record<string, boolean>>({});
+  const [nowTick, setNowTick] = useState<number>(Date.now());
 
-  // ─── Fetch Numbers ─────────────────────────────────────────────────────────
+  const fadeAnim = useRef(new Animated.Value(initialCachedNumbers ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (!initialCachedNumbers) {
+      getCachedData<NumberItem[]>('my_numbers_list').then((saved) => {
+        if (saved && saved.length > 0) {
+          setNumbers(saved);
+          setLoading(false);
+        }
+      });
+    }
+  }, [initialCachedNumbers]);
+
+  // Only tick every second when viewing active numbers that have an expiry timer
+  const hasActiveExpiringNumbers =
+    activeTab === 'active' &&
+    settings.showExpiryTimer &&
+    numbers.some(
+      (n) =>
+        ['active', 'waiting'].includes((n.status || '').toLowerCase()) &&
+        Boolean(n.expiresAt)
+    );
+
+  useEffect(() => {
+    if (!hasActiveExpiringNumbers) return;
+    const timer = setInterval(() => {
+      setNowTick(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [hasActiveExpiringNumbers]);
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [fadeAnim, activeTab]);
 
   const fetchNumbers = useCallback(async () => {
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+    }, LOADING_TIMEOUT_MS);
+
     try {
-      const [numbersRes, pendingRes, cheapRes] = await Promise.allSettled([
-        apiClient.get('/numbers/my-numbers'),
-        apiClient.get('/numbers/pending'),
-        apiClient.get('/cheap/my-numbers'),
+      const [numbersRes, cheapRes] = await Promise.allSettled([
+        apiClient.get('/numbers/my-numbers', { timeout: 5000 }),
+        apiClient.get('/cheap/my-numbers', { timeout: 5000 }),
       ]);
 
-      let allNumbers: NumberItem[] = [];
+      const anySuccess =
+        numbersRes.status === 'fulfilled' || cheapRes.status === 'fulfilled';
+      if (!anySuccess) {
+        return;
+      }
 
+      let allNumbers: NumberItem[] = [];
       if (numbersRes.status === 'fulfilled' && numbersRes.value.data?.data) {
-        const list = Array.isArray(numbersRes.value.data.data) ? numbersRes.value.data.data : [];
-        allNumbers = [...allNumbers, ...list];
+        const d = Array.isArray(numbersRes.value.data.data) ? numbersRes.value.data.data : [];
+        allNumbers = [...allNumbers, ...d];
       }
       if (cheapRes.status === 'fulfilled' && cheapRes.value.data?.data) {
-        const list = Array.isArray(cheapRes.value.data.data) ? cheapRes.value.data.data : [];
-        allNumbers = [...allNumbers, ...list];
+        const d = Array.isArray(cheapRes.value.data.data) ? cheapRes.value.data.data : [];
+        allNumbers = [...allNumbers, ...d];
       }
 
-      if (allNumbers.length > 0) {
-        allNumbers.sort(
-          (a, b) =>
-            new Date(b.purchasedAt || b.otps?.[0]?.receivedAt || 0).getTime() -
-            new Date(a.purchasedAt || a.otps?.[0]?.receivedAt || 0).getTime()
-        );
-        setNumbers(allNumbers);
-      }
-
-      if (pendingRes.status === 'fulfilled' && pendingRes.value.data?.success) {
-        const list = Array.isArray(pendingRes.value.data.data) ? pendingRes.value.data.data : [];
-        setPendingOrders(list);
-      }
+      allNumbers.sort(
+        (a, b) =>
+          new Date(b.purchasedAt || 0).getTime() - new Date(a.purchasedAt || 0).getTime()
+      );
+      setNumbers(allNumbers);
+      setCachedData('my_numbers_list', allNumbers);
     } catch (err) {
       console.warn('[MyNumbers] fetch error:', err);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
-      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
     fetchNumbers();
-    const interval = setInterval(fetchNumbers, 15000);
-    return () => clearInterval(interval);
-  }, [fetchNumbers]);
+    const pollInterval = setInterval(fetchNumbers, 15000);
 
-  const onRefresh = useCallback(async () => {
+    const unsubOtp = socketService.subscribe('otp_received', (data: any) => {
+      triggerHaptic('success');
+      if (data && data.otp) {
+        showToast(`New OTP Message: ${data.otp}`, 'success');
+      } else {
+        showToast('New SMS Message Received!', 'success');
+      }
+      fetchNumbers();
+    });
+
+    const unsubRental = socketService.subscribe('rental_extended', () => {
+      showToast('A rental number was auto-extended.', 'info');
+      fetchNumbers();
+    });
+
+    return () => {
+      clearInterval(pollInterval);
+      unsubOtp();
+      unsubRental();
+    };
+  }, [fetchNumbers, triggerHaptic, showToast]);
+
+  const activeList = numbers.filter((n) =>
+    ['active', 'waiting'].includes((n.status || '').toLowerCase())
+  );
+  const historyList = numbers.filter(
+    (n) => !['active', 'waiting'].includes((n.status || '').toLowerCase())
+  );
+
+  useEffect(() => {
+    if (!loading && activeList.length === 0 && historyList.length > 0 && activeTab === 'active') {
+      setActiveTab('history');
+    }
+  }, [loading, activeList.length, historyList.length, activeTab]);
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    triggerHaptic('light');
     await fetchNumbers();
-  }, [fetchNumbers]);
+    setRefreshing(false);
+  };
 
-  // ─── Clipboard & Actions ───────────────────────────────────────────────────
-
-  const handleCopyPhone = async (phone: string, id: string) => {
-    await Clipboard.setStringAsync(phone);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setCopiedKey(`phone-${id}`);
+  const handleCopy = async (text: string, key: string, label = 'Copied to clipboard!') => {
+    if (!text) return;
+    await Clipboard.setStringAsync(text);
+    triggerHaptic('success');
+    setCopiedKey(key);
+    showToast(label, 'success');
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const handleCopyOtp = async (code: string, id: string) => {
-    await Clipboard.setStringAsync(code);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setCopiedKey(`otp-${id}`);
-    setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  const handleCheckOTP = async (numberId: string, type?: string) => {
-    setActionLoadingId(numberId);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const handleCheckOTP = async (numId: string, type?: string) => {
+    setActionLoadingId(numId);
+    triggerHaptic('light');
     try {
       if (type === 'cheap') {
-        await apiClient.get(`/cheap/status/${numberId}`);
+        await apiClient.get(`/cheap/status/${numId}`);
       } else {
-        await apiClient.get(`/numbers/${numberId}/check-otp`);
+        await apiClient.get(`/numbers/${numId}/check-otp`);
       }
       await fetchNumbers();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (err) {
-      console.warn('[MyNumbers] check error:', err);
+      showToast('Checked for new SMS messages', 'info');
+    } catch {
+      showToast('No new verification SMS received yet.', 'info');
     } finally {
       setActionLoadingId(null);
     }
   };
 
-  const handleCancelNumber = (numberId: string, type?: string) => {
-    Alert.alert(
-      'Cancel Number',
-      'Cancel this number and receive an instant refund to your wallet balance?',
-      [
-        { text: 'Keep', style: 'cancel' },
-        {
-          text: 'Cancel & Refund',
-          style: 'destructive',
-          onPress: async () => {
-            setActionLoadingId(numberId);
+  const handleCancelNumber = (numId: string, type?: string) => {
+    showDialog({
+      title: 'Cancel Number & Refund?',
+      message:
+        'Are you sure you want to cancel this number? If the number has not received an SMS code, your wallet will be refunded automatically.',
+      variant: 'danger',
+      confirmText: 'Cancel & Refund',
+      cancelText: 'Keep Number',
+      onConfirm: async () => {
+        setActionLoadingId(numId);
+        try {
+          if (type === 'cheap') {
+            await apiClient.post(`/cheap/cancel/${numId}`);
+          } else {
+            await apiClient.post(`/numbers/${numId}/cancel`);
+          }
+          showToast('Number cancelled and refunded!', 'success');
+          await fetchNumbers();
+        } catch (err: any) {
+          showDialog({
+            title: 'Cancel Notice',
+            message:
+              err?.response?.data?.message ||
+              'Unable to cancel this number right now. It may have already received an SMS or expired.',
+            variant: 'warning',
+            confirmText: 'Got It',
+          });
+        } finally {
+          setActionLoadingId(null);
+        }
+      },
+    });
+  };
+
+  const handleReuseNumber = async (numId: string) => {
+    setActionLoadingId(numId);
+    triggerHaptic('light');
+    try {
+      const infoRes = await apiClient.get(`/numbers/${numId}/reuse`);
+      const info = infoRes.data?.data;
+
+      if (infoRes.data?.success === false || !info) {
+        showDialog({
+          title: 'Reuse Unavailable',
+          message: infoRes.data?.message || 'This number cannot be reused right now.',
+          variant: 'warning',
+          confirmText: 'Got It',
+        });
+        setActionLoadingId(null);
+        return;
+      }
+
+      if (info.requiresReactivation) {
+        setActionLoadingId(null);
+        showDialog({
+          title: 'Reactivate Number?',
+          message: `Reactivating this number for another SMS costs ${info.currency || ''} ${info.reactivationCost}. Would you like to proceed?`,
+          variant: 'confirm',
+          confirmText: 'Pay & Reactivate',
+          cancelText: 'Cancel',
+          onConfirm: async () => {
+            setActionLoadingId(numId);
             try {
-              if (type === 'cheap') {
-                await apiClient.post(`/cheap/cancel/${numberId}`);
+              const res = await apiClient.post(`/numbers/${numId}/reuse`, {
+                payToReactivate: true,
+              });
+              if (res.data?.success) {
+                showToast('Number reactivated successfully!', 'success');
+                await fetchNumbers();
+                setActiveTab('active');
               } else {
-                await apiClient.post(`/numbers/${numberId}/cancel`);
+                showDialog({
+                  title: 'Reuse Notice',
+                  message: res.data?.message || 'Failed to reactivate number.',
+                  variant: 'warning',
+                  confirmText: 'OK',
+                });
               }
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              await fetchNumbers();
-            } catch (err: any) {
-              Alert.alert('Notice', err.response?.data?.message || 'Could not cancel number.');
+            } catch (e: any) {
+              showDialog({
+                title: 'Reuse Failed',
+                message: e?.response?.data?.message || 'Could not reactivate number.',
+                variant: 'danger',
+                confirmText: 'OK',
+              });
             } finally {
               setActionLoadingId(null);
             }
           },
-        },
-      ]
-    );
-  };
-
-  const handleReuse = async (numberId: string) => {
-    setActionLoadingId(numberId);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    try {
-      const infoRes = await apiClient.get(`/numbers/${numberId}/reuse`);
-      const info = infoRes.data?.data;
-      if (!info) {
-        Alert.alert('Notice', infoRes.data?.message || 'Cannot reuse this number.');
-        return;
-      }
-      if (info.requiresReactivation) {
-        Alert.alert(
-          'Reactivate Number',
-          `Reactivating costs ${info.currency || '$'} ${info.reactivationCost}. Proceed?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Reactivate',
-              onPress: async () => {
-                await apiClient.post(`/numbers/${numberId}/reuse`, { payToReactivate: true });
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        });
+      } else if (info.canResendForFree) {
+        setActionLoadingId(null);
+        showDialog({
+          title: 'Receive Another SMS?',
+          message: 'This number can receive another verification SMS for free. Proceed?',
+          variant: 'confirm',
+          confirmText: 'Activate Free SMS',
+          cancelText: 'Cancel',
+          onConfirm: async () => {
+            setActionLoadingId(numId);
+            try {
+              const res = await apiClient.post(`/numbers/${numId}/reuse`, {});
+              if (res.data?.success) {
+                showToast('Number ready for another SMS!', 'success');
                 await fetchNumbers();
                 setActiveTab('active');
-              },
-            },
-          ]
-        );
-      } else if (info.canResendForFree) {
-        await apiClient.post(`/numbers/${numberId}/reuse`, {});
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        await fetchNumbers();
-        setActiveTab('active');
+              } else {
+                showDialog({
+                  title: 'Reuse Notice',
+                  message: res.data?.message || 'Cannot reuse this number right now.',
+                  variant: 'warning',
+                  confirmText: 'OK',
+                });
+              }
+            } catch (e: any) {
+              showDialog({
+                title: 'Reuse Notice',
+                message: e?.response?.data?.message || 'Failed to reuse number.',
+                variant: 'danger',
+                confirmText: 'OK',
+              });
+            } finally {
+              setActionLoadingId(null);
+            }
+          },
+        });
+      } else {
+        setActionLoadingId(null);
+        showDialog({
+          title: 'Reuse Notice',
+          message: info.message || 'This number cannot be reused right now.',
+          variant: 'warning',
+          confirmText: 'Got It',
+        });
       }
     } catch (err: any) {
-      Alert.alert('Notice', err.response?.data?.message || 'Cannot reuse number.');
-    } finally {
       setActionLoadingId(null);
+      showDialog({
+        title: 'Reuse Notice',
+        message:
+          err?.response?.data?.message || 'This number cannot be reused right now.',
+        variant: 'warning',
+        confirmText: 'Got It',
+      });
     }
   };
 
-  // ─── Filter numbers ────────────────────────────────────────────────────────
+  const formatTimeRemaining = (expiresAt?: string): string => {
+    if (!expiresAt) return '';
+    const diff = new Date(expiresAt).getTime() - nowTick;
+    if (diff <= 0) return 'Expired';
+    const minutes = Math.floor(diff / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+  };
 
-  const activeNumbers = numbers.filter(
-    (n) =>
-      ['active', 'waiting', 'pending'].includes(n.status?.toLowerCase()) ||
-      (n.expiresAt && new Date(n.expiresAt).getTime() > Date.now())
-  );
-  const historyNumbers = numbers.filter((n) => !activeNumbers.includes(n));
+  const handleSelectNavTab = (tab: NavTabId) => {
+    if (tab === 'home') onNavigateToHome?.();
+    else if (tab === 'buy') onNavigateToBuy?.();
+    else if (tab === 'rentals') onNavigateToRentals?.();
+    else if (tab === 'wallet') onNavigateToWallet?.();
+  };
 
-  const bottomNavItems = [
-    { id: 'home', label: 'Home', icon: Home, onPress: onNavigateToHome },
-    { id: 'buy', label: 'Buy Number', icon: ShoppingCart, onPress: onNavigateToBuy },
-    { id: 'numbers', label: 'My SMS', icon: MessageSquare, badge: activeNumbers.length, onPress: () => {} },
-    { id: 'wallet', label: 'Wallet', icon: Wallet, onPress: onNavigateToWallet },
-    { id: 'rentals', label: 'Rentals', icon: PhoneCall, onPress: onNavigateToRentals },
-  ];
+  const displayedList = activeTab === 'active' ? activeList : historyList;
 
   return (
-    <SafeAreaView style={s.root} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor="#080808" />
+    <SafeAreaView style={[s.safeArea, { backgroundColor: colors.bg }]} edges={['top']}>
+      <StatusBar style={colors.statusBar} />
 
-      {/* ── MODERN LUXURY HEADER ────────────────────────────────────────── */}
       <ModernHeader
         title="My Numbers"
-        subtitle={`${activeNumbers.length} active verification lines`}
         onBack={onBack}
         onRefresh={onRefresh}
         isRefreshing={refreshing}
       />
 
-      {/* ── Clean 2-Tab Pill Switcher ──────────────────────────────────── */}
-      <View style={s.tabsRow}>
-        <View style={s.tabsTrack}>
-          <TouchableOpacity
-            style={[s.tabItem, activeTab === 'active' && s.tabItemActive]}
-            onPress={() => {
-              Haptics.selectionAsync();
-              setActiveTab('active');
-            }}
-            activeOpacity={0.8}
-          >
-            <Smartphone size={14} color={activeTab === 'active' ? '#FFFFFF' : '#8E8E93'} />
-            <Text style={[s.tabItemText, activeTab === 'active' && s.tabItemTextActive]}>
-              Active ({activeNumbers.length + pendingOrders.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[s.tabItem, activeTab === 'history' && s.tabItemActive]}
-            onPress={() => {
-              Haptics.selectionAsync();
-              setActiveTab('history');
-            }}
-            activeOpacity={0.8}
-          >
-            <History size={14} color={activeTab === 'history' ? '#FFFFFF' : '#8E8E93'} />
-            <Text style={[s.tabItemText, activeTab === 'history' && s.tabItemTextActive]}>
-              History ({historyNumbers.length})
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* ── Scrollable Card Content ───────────────────────────────────── */}
       <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={[s.scrollContent, { paddingBottom: 110 + Math.max(insets.bottom, 12) }]}
+        style={s.scroll}
+        contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#FFFFFF"
-            colors={['#FFFFFF']}
+            tintColor={colors.primary}
           />
         }
       >
+        {/* ── HEADER ROW (Matches MyNumbersPage.tsx!) ─────────────────────── */}
+        <View style={[s.headerBar, { borderBottomColor: colors.border }]}>
+          <Text style={[s.pageTitle, { color: colors.text }]}>My Numbers</Text>
+
+          <View style={s.headerControls}>
+            <TouchableOpacity
+              onPress={() => {
+                triggerHaptic('selection');
+                setActiveTab('active');
+              }}
+              style={[
+                s.tabPill,
+                activeTab === 'active' && { backgroundColor: colors.primarySoft },
+              ]}
+            >
+              <Smartphone
+                size={14}
+                color={activeTab === 'active' ? colors.primary : colors.textMuted}
+              />
+              <Text
+                style={[
+                  s.tabPillText,
+                  { color: activeTab === 'active' ? colors.primary : colors.textMuted },
+                ]}
+              >
+                Active
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                triggerHaptic('selection');
+                setActiveTab('history');
+              }}
+              style={[
+                s.tabPill,
+                activeTab === 'history' && { backgroundColor: colors.primarySoft },
+              ]}
+            >
+              <History
+                size={14}
+                color={activeTab === 'history' ? colors.primary : colors.textMuted}
+              />
+              <Text
+                style={[
+                  s.tabPillText,
+                  { color: activeTab === 'history' ? colors.primary : colors.textMuted },
+                ]}
+              >
+                History
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={onRefresh}
+              style={[
+                s.refreshBtn,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <RefreshCw size={15} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── NUMBERS LIST (Exact Match to Web NumberCard.tsx — Zero Nested Boxes!) ── */}
         {loading ? (
-          <View style={s.cardsStack}>
+          <View style={{ gap: 14 }}>
             <SkeletonNumberCard />
             <SkeletonNumberCard />
           </View>
-        ) : activeTab === 'active' ? (
-          <View style={s.cardsStack}>
-            {/* Pending Queued Orders */}
-            {pendingOrders.map((order) => (
-              <View key={order._id} style={[s.card, s.cardPending]}>
-                <View style={s.cardHeader}>
-                  <View style={s.serviceInfo}>
-                    <Text style={s.serviceTitle}>{order.service}</Text>
-                    <Text style={s.countrySubtitle}>{order.country}</Text>
+        ) : displayedList.length === 0 ? (
+          <AnimatedEmptyState
+            type="numbers"
+            title={
+              activeTab === 'active'
+                ? 'No Active Numbers Yet'
+                : 'No Order History Yet'
+            }
+            subtitle={
+              activeTab === 'active'
+                ? "You don't have any active numbers waiting for SMS right now. Purchase a virtual number to receive OTP codes."
+                : "You haven't placed any number orders yet. Your completed and expired verifications will appear here."
+            }
+            actionLabel="Buy a Number"
+            onAction={onNavigateToBuy}
+          />
+        ) : (
+          <Animated.View style={{ opacity: fadeAnim, gap: 16 }}>
+            {displayedList.map((num) => {
+              const isPhoneCopied = copiedKey === `ph-${num.id}`;
+              const isHistory = activeTab === 'history';
+              const isBusy = actionLoadingId === num.id;
+              const dotColor =
+                num.status === 'active' || num.status === 'completed'
+                  ? '#10B981'
+                  : num.status === 'waiting'
+                  ? '#F59E0B'
+                  : '#EF4444';
+
+              return (
+                <View
+                  key={num.id}
+                  style={[
+                    s.modernNumberCard,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                    isHistory && { opacity: 0.85 },
+                  ]}
+                >
+                  {/* Top Row: Status Dot + Service Name + Country Pill (Bounded — Never Overflows!) */}
+                  <View style={s.mncTop}>
+                    <View style={s.mncService}>
+                      <View style={[s.mncDot, { backgroundColor: dotColor }]} />
+                      <Text
+                        style={[s.mncServiceName, { color: colors.text }]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {num.serviceName}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        s.mncCountryPill,
+                        { backgroundColor: colors.bg },
+                      ]}
+                    >
+                      <Text
+                        style={[s.mncCountryText, { color: colors.textMuted }]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {num.countryName || num.countryCode || 'UNITED STATES'}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={[s.statusPill, s.statusPillNeutral]}>
-                    <Text style={s.statusPillText}>Queued</Text>
+
+                  {/* Phone Number Row (Directly on Card — Auto-Fits Inside Container!) */}
+                  <TouchableOpacity
+                    style={s.mncMain}
+                    onPress={() =>
+                      handleCopy(num.phoneNumber, `ph-${num.id}`, 'Phone number copied!')
+                    }
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[s.mncPhone, { color: colors.text }]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.65}
+                    >
+                      {num.phoneNumber}
+                    </Text>
+                    {isPhoneCopied ? (
+                      <Check size={20} color="#10B981" />
+                    ) : (
+                      <Copy size={20} color={colors.textMuted} style={{ opacity: 0.45 }} />
+                    )}
+                  </TouchableOpacity>
+
+                  {/* Countdown Timer for Active Numbers (Matches Web NumberCard.tsx!) */}
+                  {!isHistory && settings.showExpiryTimer && num.expiresAt ? (
+                    <Text style={[s.mncTimer, { color: colors.textMuted }]}>
+                      Expires in{' '}
+                      <Text style={s.mncTimeValue}>
+                        {formatTimeRemaining(num.expiresAt)}
+                      </Text>
+                    </Text>
+                  ) : null}
+
+                  {/* Messages Area: Displays 2–3 Messages at a Time, Tap Code or Tap Message to Copy! */}
+                  {num.otps && num.otps.length > 0 ? (
+                    <View style={s.mncMessagesWrapper}>
+                      <ScrollView
+                        style={s.mncMessagesScroll}
+                        contentContainerStyle={{ gap: 10 }}
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator={num.otps.length > 2}
+                      >
+                        {(expandedCardIds[num.id]
+                          ? num.otps
+                          : num.otps.slice(0, 3)
+                        ).map((otp, idx) => {
+                          const isOtpCopied = copiedKey === `otp-${num.id}-${idx}`;
+                          const isMsgCopied = copiedKey === `msg-${num.id}-${idx}`;
+                          const clean = cleanMessage(otp.message);
+                          return (
+                            <View
+                              key={idx}
+                              style={[
+                                s.mncMessageBubble,
+                                {
+                                  backgroundColor: colors.isDark
+                                    ? 'rgba(255,255,255,0.04)'
+                                    : 'rgba(15, 23, 42, 0.035)',
+                                },
+                              ]}
+                            >
+                              {/* Tap Code Header to Copy Verification Code */}
+                              <TouchableOpacity
+                                style={s.mncBubbleHeader}
+                                onPress={() =>
+                                  handleCopy(
+                                    otp.code,
+                                    `otp-${num.id}-${idx}`,
+                                    `Code ${otp.code} copied!`
+                                  )
+                                }
+                                activeOpacity={0.7}
+                              >
+                                <Text
+                                  style={s.mncCode}
+                                  numberOfLines={1}
+                                  adjustsFontSizeToFit
+                                >
+                                  {otp.code}
+                                </Text>
+                                <View style={s.copyActionWrap}>
+                                  {isOtpCopied ? (
+                                    <Check size={15} color="#10B981" />
+                                  ) : (
+                                    <Copy size={15} color={colors.textMuted} />
+                                  )}
+                                </View>
+                              </TouchableOpacity>
+
+                              {/* Tap Message Text to Copy Full SMS Message (Matches Web NumberCard.tsx!) */}
+                              {settings.showSmsMessagePreview && clean ? (
+                                <TouchableOpacity
+                                  style={s.mncBubbleBody}
+                                  onPress={() =>
+                                    handleCopy(
+                                      clean,
+                                      `msg-${num.id}-${idx}`,
+                                      'Full SMS message copied!'
+                                    )
+                                  }
+                                  activeOpacity={0.7}
+                                >
+                                  <Text
+                                    style={[
+                                      s.mncText,
+                                      {
+                                        color: isMsgCopied
+                                          ? '#10B981'
+                                          : colors.textMuted,
+                                      },
+                                    ]}
+                                  >
+                                    {clean}
+                                  </Text>
+                                </TouchableOpacity>
+                              ) : null}
+                            </View>
+                          );
+                        })}
+                      </ScrollView>
+
+                      {num.otps.length > 3 && (
+                        <TouchableOpacity
+                          onPress={() => {
+                            triggerHaptic('selection');
+                            setExpandedCardIds((prev) => ({
+                              ...prev,
+                              [num.id]: !prev[num.id],
+                            }));
+                          }}
+                          style={s.moreMessagesToggle}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>
+                            {expandedCardIds[num.id]
+                              ? 'Show latest 3 messages'
+                              : `View all ${num.otps.length} messages (${num.otps.length - 3} more)`}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ) : (
+                    <View style={s.mncNoMessages}>
+                      {!isHistory ? (
+                        <>
+                          <ActivityIndicator size="small" color={colors.textMuted} />
+                          <Text style={{ fontSize: 13.5, color: colors.textMuted }}>
+                            Waiting for SMS...
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={{ fontSize: 13.5, color: colors.textMuted }}>
+                          No SMS received
+                        </Text>
+                      )}
+                    </View>
+                  )}
+
+                  {/* Footer Actions */}
+                  <View style={s.mncFooterActions}>
+                    {!isHistory ? (
+                      <>
+                        <TouchableOpacity
+                          style={[
+                            s.outlineActionBtn,
+                            { borderColor: colors.border },
+                          ]}
+                          onPress={() => handleCheckOTP(num.id, num.type)}
+                          disabled={isBusy}
+                        >
+                          {isBusy ? (
+                            <ActivityIndicator size="small" color={colors.text} />
+                          ) : (
+                            <>
+                              <RefreshCw size={15} color={colors.text} />
+                              <Text style={[s.outlineActionText, { color: colors.text }]}>
+                                Check
+                              </Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={s.dangerActionBtn}
+                          onPress={() => handleCancelNumber(num.id, num.type)}
+                          disabled={isBusy}
+                        >
+                          <XCircle size={15} color="#EF4444" />
+                          <Text style={s.dangerActionText}>Cancel</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <TouchableOpacity
+                        style={[
+                          s.outlineActionBtn,
+                          { borderColor: colors.border },
+                        ]}
+                        onPress={() => handleReuseNumber(num.id)}
+                        disabled={isBusy}
+                      >
+                        <RotateCcw size={15} color={colors.text} />
+                        <Text style={[s.outlineActionText, { color: colors.text }]}>
+                          Reuse
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
-                <Text style={s.pendingNote}>Connecting to carrier line...</Text>
-              </View>
-            ))}
-
-            {/* Active Numbers */}
-            {activeNumbers.length === 0 && pendingOrders.length === 0 ? (
-              <View style={s.emptyCard}>
-                <Smartphone size={36} color="#8E8E93" style={{ opacity: 0.4 }} />
-                <Text style={s.emptyTitle}>No active numbers</Text>
-                <Text style={s.emptySubtitle}>
-                  You don't have any numbers waiting for SMS right now.
-                </Text>
-                <TouchableOpacity
-                  style={s.emptyBuyBtn}
-                  onPress={() => onNavigateToBuy?.()}
-                  activeOpacity={0.85}
-                >
-                  <Text style={s.emptyBuyBtnText}>Buy a Number</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              activeNumbers.map((num) => (
-                <SimpleNumberCard
-                  key={num.id}
-                  num={num}
-                  isHistory={false}
-                  isActionLoading={actionLoadingId === num.id}
-                  copiedKey={copiedKey}
-                  onCopyPhone={handleCopyPhone}
-                  onCopyOtp={handleCopyOtp}
-                  onCheckOTP={handleCheckOTP}
-                  onCancel={handleCancelNumber}
-                  onReuse={handleReuse}
-                />
-              ))
-            )}
-          </View>
-        ) : (
-          /* History Numbers */
-          <View style={s.cardsStack}>
-            {historyNumbers.length === 0 ? (
-              <View style={s.emptyCard}>
-                <History size={36} color="#8E8E93" style={{ opacity: 0.4 }} />
-                <Text style={s.emptyTitle}>No history</Text>
-                <Text style={s.emptySubtitle}>Your completed numbers will appear here.</Text>
-              </View>
-            ) : (
-              historyNumbers.map((num) => (
-                <SimpleNumberCard
-                  key={num.id}
-                  num={num}
-                  isHistory={true}
-                  isActionLoading={actionLoadingId === num.id}
-                  copiedKey={copiedKey}
-                  onCopyPhone={handleCopyPhone}
-                  onCopyOtp={handleCopyOtp}
-                  onCheckOTP={handleCheckOTP}
-                  onCancel={handleCancelNumber}
-                  onReuse={handleReuse}
-                />
-              ))
-            )}
-          </View>
+              );
+            })}
+          </Animated.View>
         )}
+
+        <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* ── MODERN FLOATING DOCK BOTTOM NAVIGATION ──────────────────────── */}
       <ModernBottomNav
         activeTab="sms"
-        badgeCount={activeNumbers.length}
-        onSelectTab={(tabId: NavTabId) => {
-          if (tabId === 'home') {
-            onNavigateToHome?.();
-          } else if (tabId === 'buy') {
-            onNavigateToBuy?.();
-          } else if (tabId === 'rentals') {
-            onNavigateToRentals?.();
-          } else if (tabId === 'wallet') {
-            onNavigateToWallet?.();
-          }
-        }}
+        badgeCount={activeList.length}
+        onSelectTab={handleSelectNavTab}
       />
     </SafeAreaView>
   );
 };
 
-// ─── Minimalist Styles (No rainbow colors, clean, Apple-like) ────────────────
-
 const s = StyleSheet.create({
-  root: {
+  safeArea: {
     flex: 1,
-    backgroundColor: '#080808',
   },
-
-  // Top Bar
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: PAD,
-    paddingTop: 8,
-    paddingBottom: 14,
-  },
-  topBarLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#161618',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pageTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: -0.4,
-    color: '#FFFFFF',
-  },
-  refreshCircleBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#161618',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // 2-Tab Switcher
-  tabsRow: {
-    paddingHorizontal: PAD,
-    marginBottom: 14,
-  },
-  tabsTrack: {
-    flexDirection: 'row',
-    backgroundColor: '#141416',
-    borderRadius: 12,
-    padding: 3,
-    gap: 4,
-  },
-  tabItem: {
+  scroll: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    borderRadius: 10,
   },
-  tabItemActive: {
-    backgroundColor: '#222226',
-  },
-  tabItemText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#8E8E93',
-  },
-  tabItemTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-
-  // Scroll Content
   scrollContent: {
     paddingHorizontal: PAD,
-    paddingTop: 4,
+    paddingTop: 8,
+    gap: 18,
   },
-  cardsStack: {
-    gap: 12,
-  },
-
-  // Card
-  card: {
-    backgroundColor: '#121214',
-    borderRadius: 18,
-    padding: 16,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  cardHistory: {
-    opacity: 0.65,
-  },
-  cardPending: {
-    borderStyle: 'dashed',
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-  },
-  pendingNote: {
-    fontSize: 12,
-    color: '#8E8E93',
-  },
-
-  // Card Header
-  cardHeader: {
+  headerBar: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+  },
+  pageTitle: {
+    fontSize: 25,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+  },
+  headerControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tabPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 9,
+  },
+  tabPillText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  refreshBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyState: {
+    paddingVertical: 48,
+    alignItems: 'center',
+    gap: 12,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  buyBtn: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: 11,
+    marginTop: 4,
+  },
+  buyBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+
+  // Modern Number Card (Matches MyNumbersPage.css — Strict Overflow Prevention)
+  modernNumberCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 18,
+    gap: 12,
+    overflow: 'hidden',
+  },
+  mncTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  mncService: {
+    flex: 1,
+    flexShrink: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  mncDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    flexShrink: 0,
+  },
+  mncServiceName: {
+    flexShrink: 1,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  mncCountryPill: {
+    maxWidth: '44%',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    flexShrink: 0,
+  },
+  mncCountryText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  mncMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
     gap: 10,
   },
-  serviceInfo: {
+  mncPhone: {
     flex: 1,
-    gap: 3,
-  },
-  serviceTitle: {
-    fontSize: 16,
+    flexShrink: 1,
+    fontSize: 22,
     fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: -0.2,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    letterSpacing: -0.4,
   },
-  countryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
+  mncTimer: {
+    fontSize: 12.5,
+    marginTop: -4,
   },
-  flagEmoji: { fontSize: 13 },
-  countrySubtitle: {
-    fontSize: 12,
-    color: '#8E8E93',
-    fontWeight: '500',
+  mncTimeValue: {
+    color: '#EF4444',
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  dotSep: { fontSize: 10, color: '#48484A' },
-  timeAgo: { fontSize: 11, color: '#8E8E93' },
-
-  // Status Pill
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
+  mncMessagesWrapper: {
+    gap: 8,
   },
-  statusPillSuccess: {
-    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+  mncMessagesScroll: {
+    maxHeight: 215, // Shows 2-3 messages with code at a time just like web .mnc-messages-area
   },
-  statusPillNeutral: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusPillText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-
-  // Phone Row
-  phoneRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#18181A',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+  mncMessageBubble: {
     borderRadius: 12,
-    gap: 8,
+    paddingVertical: 11,
+    paddingHorizontal: 13,
+    gap: 5,
+    overflow: 'hidden',
   },
-  phoneNumberText: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.2,
-  },
-  copyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  copyBtnSuccess: {
-    backgroundColor: 'rgba(34, 197, 94, 0.15)',
-  },
-  copyBtnText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#8E8E93',
-  },
-
-  // Expiry Timer
-  expiryTimerText: {
-    fontSize: 12,
-    color: '#8E8E93',
-  },
-
-  // Code Box
-  codeBox: {
-    backgroundColor: '#161619',
-    borderRadius: 14,
-    padding: 12,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  codeTop: {
+  mncBubbleHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
   },
-  codeLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    color: '#8E8E93',
-  },
-  codeCopyPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#242428',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  codeCopyPillDone: {
-    backgroundColor: 'rgba(34, 197, 94, 0.15)',
-  },
-  codeCopyText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  codeDisplay: {
-    fontSize: 26,
+  mncCode: {
+    flex: 1,
+    flexShrink: 1,
+    color: '#2563EB',
+    fontSize: 18,
     fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: 2,
-    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  smsTextWrap: {
-    paddingTop: 2,
+  copyActionWrap: {
+    padding: 2,
+    flexShrink: 0,
   },
-  smsMessageText: {
-    fontSize: 12,
-    lineHeight: 16,
-    color: '#8E8E93',
-    fontStyle: 'italic',
+  mncBubbleBody: {
+    width: '100%',
   },
-
-  // Waiting Row
-  waitingRow: {
+  mncText: {
+    fontSize: 13,
+    lineHeight: 18,
+    flexShrink: 1,
+  },
+  moreMessagesToggle: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+  },
+  mncNoMessages: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingVertical: 6,
   },
-  waitingText: {
-    fontSize: 12,
-    color: '#8E8E93',
-  },
-
-  // Card Actions
-  cardActions: {
+  mncFooterActions: {
     flexDirection: 'row',
-    gap: 8,
-    paddingTop: 2,
+    gap: 10,
+    marginTop: 2,
   },
-  actionBtnOutline: {
+  outlineActionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    backgroundColor: '#1C1C20',
-    paddingVertical: 9,
+    gap: 7,
+    paddingVertical: 11,
     borderRadius: 10,
+    borderWidth: 1,
   },
-  actionBtnText: {
-    fontSize: 12,
+  outlineActionText: {
+    fontSize: 13.5,
     fontWeight: '600',
-    color: '#FFFFFF',
   },
-  actionBtnSubtle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    backgroundColor: '#18181A',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 10,
-  },
-  actionBtnSubtleText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#8E8E93',
-  },
-
-  // Empty State
-  emptyCard: {
-    backgroundColor: '#121214',
-    borderRadius: 18,
-    padding: 32,
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 10,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginTop: 4,
-  },
-  emptySubtitle: {
-    fontSize: 13,
-    color: '#8E8E93',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  emptyBuyBtn: {
-    marginTop: 12,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  emptyBuyBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#000000',
-  },
-
-  // Bottom Navigation Bar
-  bottomNavContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#0C0C0E',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.06)',
-    paddingTop: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 20,
-  },
-  bottomNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingHorizontal: 8,
-  },
-  navItem: {
+  dangerActionBtn: {
     flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 4,
+    gap: 7,
+    paddingVertical: 11,
+    borderRadius: 10,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
   },
-  navIconWrapper: {
-    width: 44,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 3,
-  },
-  navIconWrapperActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  navLabel: {
-    fontSize: 11,
+  dangerActionText: {
+    color: '#EF4444',
+    fontSize: 13.5,
     fontWeight: '600',
-    letterSpacing: -0.2,
-  },
-  navBadge: {
-    position: 'absolute',
-    top: -2,
-    right: 4,
-    backgroundColor: '#EF4444',
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
-    paddingHorizontal: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#0C0C0E',
-  },
-  navBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '800',
   },
 });
-
-export default MyNumbersScreen;

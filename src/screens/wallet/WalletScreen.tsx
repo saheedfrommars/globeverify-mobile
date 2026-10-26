@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,53 +6,57 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Modal,
   TextInput,
-  Alert,
   ActivityIndicator,
+  Alert,
   Linking,
+  AppState,
+  Animated,
+  Easing,
   Platform,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
-import * as Clipboard from 'expo-clipboard';
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  ChevronLeft,
-  Eye,
-  EyeOff,
-  ArrowDownLeft,
+  Wallet,
   ArrowUpRight,
-  RotateCcw,
-  Plus,
-  Copy,
-  Check,
-  X,
+  ArrowDownLeft,
   CreditCard,
+  Coins,
+  Search,
+  RotateCcw,
   Zap,
-  Home,
-  ShoppingCart,
-  MessageSquare,
-  Repeat,
-  Wallet as WalletIcon,
-  ShieldCheck,
-  QrCode,
-  DollarSign,
+  Receipt,
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
-import apiClient from '../../api/client';
+import { useAppSettings } from '../../context/WalletSettingsContext';
+import apiClient, {
+  getMemoryCache,
+  getCachedData,
+  setCachedData,
+} from '../../api/client';
 import { formatCurrency } from '../../utils/currency';
-import { SkeletonListItem } from '../../components/ui/Skeleton';
+import { Skeleton, SkeletonListItem } from '../../components/ui/Skeleton';
+import { AnimatedEmptyState } from '../../components/ui/AnimatedEmptyState';
+import { ModernHeader } from '../../components/navigation/ModernHeader';
+import { ModernBottomNav, NavTabId } from '../../components/navigation/ModernBottomNav';
 
-const PAD = 18;
+const PAD = 16;
+const LOADING_TIMEOUT_MS = 2200;
 
-export interface Transaction {
+interface TransactionItem {
   id: string;
+  _id?: string;
   type: string;
   amount: number;
+  currency?: string;
   status: string;
   description: string;
-  balanceAfter?: number;
   createdAt: string;
+  metadata?: {
+    paymentMethod?: string;
+    reference?: string;
+  };
 }
 
 interface WalletScreenProps {
@@ -61,7 +65,22 @@ interface WalletScreenProps {
   onNavigateToBuy?: () => void;
   onNavigateToNumbers?: () => void;
   onNavigateToRentals?: () => void;
+  onNavigateToMore?: () => void;
 }
+
+const PRESETS_NGN = [2000, 5000, 10000, 25000, 50000];
+const PRESETS_USD = [5, 10, 25, 50, 100];
+
+const formatDateShort = (dateStr?: string): string => {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
 
 export const WalletScreen: React.FC<WalletScreenProps> = ({
   onBack,
@@ -69,1108 +88,1110 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
   onNavigateToBuy,
   onNavigateToNumbers,
   onNavigateToRentals,
+  onNavigateToMore,
 }) => {
   const { user, refreshUser } = useAuth();
-  const insets = useSafeAreaInsets();
+  const { settings, colors, triggerHaptic, showDialog, showToast } = useAppSettings();
 
-  const [hideBalance, setHideBalance] = useState(false);
-  const [currency, setCurrency] = useState<'USD' | 'NGN'>(
+  const [displayCurrency, setDisplayCurrency] = useState<'NGN' | 'USD'>(
     user?.currency?.toUpperCase() === 'NGN' ? 'NGN' : 'USD'
   );
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [filterTab, setFilterTab] = useState<'all' | 'deposits' | 'purchases' | 'refunds'>('all');
-  const [loading, setLoading] = useState(true);
+  const [paymentMode, setPaymentMode] = useState<'fiat' | 'crypto'>('fiat');
+  const [paymentMethods, setPaymentMethods] = useState<{
+    fiat: { enabled: boolean; reason?: string };
+    crypto: { enabled: boolean; reason?: string };
+  }>({
+    fiat: { enabled: true },
+    crypto: { enabled: true },
+  });
+  const [depositAmount, setDepositAmount] = useState<string>(
+    user?.currency?.toUpperCase() === 'NGN' ? '5000' : '10'
+  );
+  const [processingDeposit, setProcessingDeposit] = useState(false);
+
+  const initialCachedTx = getMemoryCache<TransactionItem[]>('wallet_transactions');
+
+  const [loading, setLoading] = useState(!initialCachedTx);
   const [refreshing, setRefreshing] = useState(false);
-  const [credits, setCredits] = useState<number>(0);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Deposit modal state
-  const [showDepositModal, setShowDepositModal] = useState(false);
-  const [depositMethod, setDepositMethod] = useState<'fiat' | 'crypto'>('fiat');
-  const [depositAmount, setDepositAmount] = useState('10');
-  const [initiatingDeposit, setInitiatingDeposit] = useState(false);
-  const [cryptoAddressData, setCryptoAddressData] = useState<{
-    address: string;
-    currency: string;
-    network: string;
-    checkoutUrl?: string;
-  } | null>(null);
+  const [transactions, setTransactions] = useState<TransactionItem[]>(initialCachedTx || []);
+  const [txFilter, setTxFilter] = useState<'all' | 'credit' | 'debit'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Telecom credits modal
-  const [showCreditsModal, setShowCreditsModal] = useState(false);
-  const [creditsAmount, setCreditsAmount] = useState('5');
-  const [toppingUpCredits, setToppingUpCredits] = useState(false);
-
-  // ─── Balance Calculations ───────────────────────────────────────────────────
-
-  const usdBalance =
-    user?.balances?.usd ?? (user?.currency === 'USD' ? user?.balance || 0 : (user?.balance || 0) / 1550);
-  const ngnBalance =
-    user?.balances?.ngn ?? (user?.currency === 'NGN' ? user?.balance || 0 : (user?.balance || 0) * 1550);
-
-  const primaryBalanceFormatted =
-    currency === 'NGN'
-      ? formatCurrency(ngnBalance, 'NGN')
-      : formatCurrency(usdBalance, 'USD');
-
-  const secondaryBalanceFormatted =
-    currency === 'NGN'
-      ? `≈ ${formatCurrency(usdBalance, 'USD')}`
-      : `≈ ${formatCurrency(ngnBalance, 'NGN')}`;
-
-  // ─── Data Fetching ──────────────────────────────────────────────────────────
-
-  const fetchTransactions = useCallback(async () => {
-    try {
-      const res = await apiClient.get('/wallet/transactions?limit=40');
-      if (res.data?.success && res.data.data?.transactions) {
-        setTransactions(res.data.data.transactions);
-      }
-    } catch (err) {
-      console.warn('[Wallet] fetch transactions error:', err);
-    }
-  }, []);
-
-  const fetchCredits = useCallback(async () => {
-    try {
-      const res = await apiClient.get('/numbers/credits/balance');
-      if (res.data?.success) {
-        setCredits(res.data.credits || 0);
-      }
-    } catch (err) {
-      console.warn('[Wallet] fetch credits error:', err);
-    }
-  }, []);
-
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    await Promise.all([refreshUser(), fetchTransactions(), fetchCredits()]);
-    setLoading(false);
-  }, [refreshUser, fetchTransactions, fetchCredits]);
+  // Smooth entrance animation
+  const fadeAnim = useRef(new Animated.Value(initialCachedTx ? 1 : 0)).current;
+  const slideAnim = useRef(new Animated.Value(initialCachedTx ? 0 : 8)).current;
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await Promise.all([refreshUser(), fetchTransactions(), fetchCredits()]);
-    setRefreshing(false);
-  }, [refreshUser, fetchTransactions, fetchCredits]);
-
-  // ─── Actions ───────────────────────────────────────────────────────────────
-
-  const handleCopy = async (text: string, key: string) => {
-    await Clipboard.setStringAsync(text);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  const handleToggleCurrency = async () => {
-    Haptics.selectionAsync();
-    const newCurr = currency === 'USD' ? 'NGN' : 'USD';
-    setCurrency(newCurr);
-    try {
-      await apiClient.put('/users/currency', { currency: newCurr });
-      refreshUser();
-    } catch (err) {
-      console.warn('Currency preference sync error:', err);
-    }
-  };
-
-  const handleInitiateDeposit = async () => {
-    const amt = parseFloat(depositAmount);
-    if (!amt || amt <= 0) {
-      Alert.alert('Invalid Amount', 'Please specify a valid top-up amount.');
-      return;
-    }
-    setInitiatingDeposit(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    try {
-      if (depositMethod === 'fiat') {
-        // Initiate Fiat deposit via MarsPay checkout link
-        const res = await apiClient.post('/payments/top-up', {
-          amount: amt,
-          currency: currency,
-        });
-
-        if (res.data?.success && res.data.paymentLink) {
-          setShowDepositModal(false);
-          Linking.openURL(res.data.paymentLink);
-        } else {
-          Alert.alert('Notice', res.data?.message || 'Failed to initialize payment gateway.');
+    if (!initialCachedTx) {
+      getCachedData<TransactionItem[]>('wallet_transactions').then((saved) => {
+        if (saved && saved.length > 0) {
+          setTransactions(saved);
+          setLoading(false);
         }
-      } else {
-        // Initiate Crypto top-up
-        const res = await apiClient.post('/payments/crypto/top-up', {
-          amount: amt,
-          cryptoCurrency: 'USDT-TRC20',
-        });
+      });
 
-        if (res.data?.success && res.data.address) {
-          setCryptoAddressData({
-            address: res.data.address,
-            currency: 'USDT',
-            network: 'TRC20',
-            checkoutUrl: res.data.checkoutUrl,
-          });
-        } else if (res.data?.checkoutUrl) {
-          setShowDepositModal(false);
-          Linking.openURL(res.data.checkoutUrl);
-        } else {
-          Alert.alert('Notice', res.data?.message || 'Could not generate crypto address.');
-        }
-      }
-    } catch (err: any) {
-      Alert.alert('Deposit Error', err.response?.data?.message || 'Failed to initiate deposit request.');
-    } finally {
-      setInitiatingDeposit(false);
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 240,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 240,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start();
     }
-  };
+  }, [fadeAnim, slideAnim, initialCachedTx]);
 
-  const handleTopupCredits = async () => {
-    const amt = parseFloat(creditsAmount);
-    if (!amt || amt <= 0) {
-      Alert.alert('Invalid Amount', 'Please specify a valid amount.');
-      return;
-    }
-    setToppingUpCredits(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    try {
-      const res = await apiClient.post('/numbers/credits/topup', { amount: amt });
-      if (res.data?.success) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setCredits(res.data.credits);
-        setShowCreditsModal(false);
-        setCreditsAmount('5');
-        await refreshUser();
-      } else {
-        Alert.alert('Notice', res.data?.message || 'Top-up could not be processed.');
-      }
-    } catch (err: any) {
-      Alert.alert('Top-Up Notice', err.response?.data?.message || 'Insufficient wallet balance for credit top-up.');
-    } finally {
-      setToppingUpCredits(false);
-    }
-  };
+  const isUserNgn = displayCurrency === 'NGN';
+  const userSymbol = isUserNgn ? '₦' : '$';
+  const quickPresets = isUserNgn ? PRESETS_NGN : PRESETS_USD;
+  const balanceHidden = settings.privacyHideBalance;
 
-  // ─── Filtered Transactions ──────────────────────────────────────────────────
+  const ngnBalance =
+    user?.balances?.ngn ??
+    (user?.currency === 'NGN' ? user?.balance || 0 : (user?.balance || 0) * 1600);
+  const usdBalance =
+    user?.balances?.usd ??
+    (user?.currency === 'USD' ? user?.balance || 0 : (user?.balance || 0) / 1600);
 
-  const filteredTransactions = transactions.filter((tx) => {
-    if (filterTab === 'deposits') return tx.type === 'deposit' || tx.type === 'topup';
-    if (filterTab === 'purchases') return tx.type === 'purchase' || tx.type === 'number_purchase';
-    if (filterTab === 'refunds') return tx.type === 'refund';
-    return true;
+  const primaryBalance = isUserNgn ? ngnBalance : usdBalance;
+  const balanceFormattedNum = Number(primaryBalance || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   });
 
-  return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          {onBack && (
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.selectionAsync();
-                onBack();
-              }}
-              style={styles.backButton}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <ChevronLeft size={22} color="#FFFFFF" />
-            </TouchableOpacity>
-          )}
-          <Text style={styles.headerTitle}>Wallet</Text>
-        </View>
+  const fetchWalletData = useCallback(async () => {
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+    }, LOADING_TIMEOUT_MS);
 
-        {/* Currency Switcher */}
-        <TouchableOpacity onPress={handleToggleCurrency} style={styles.currencyToggleBtn} activeOpacity={0.8}>
-          <Text style={styles.currencyToggleText}>{currency === 'USD' ? '$ USD' : '₦ NGN'}</Text>
-        </TouchableOpacity>
-      </View>
+    try {
+      const [txRes, methodsRes] = await Promise.allSettled([
+        apiClient.get('/wallet/transactions?limit=40', {
+          timeout: LOADING_TIMEOUT_MS,
+        }),
+        apiClient.get('/payments/methods', {
+          timeout: LOADING_TIMEOUT_MS,
+        }),
+      ]);
+
+      if (txRes.status === 'fulfilled') {
+        let nextTx: TransactionItem[] = [];
+        if (txRes.value.data?.data?.transactions) {
+          nextTx = txRes.value.data.data.transactions;
+        } else if (Array.isArray(txRes.value.data?.data)) {
+          nextTx = txRes.value.data.data;
+        }
+        setTransactions(nextTx);
+        setCachedData('wallet_transactions', nextTx);
+      }
+
+      if (methodsRes.status === 'fulfilled' && methodsRes.value.data?.data) {
+        const m = methodsRes.value.data.data;
+        setPaymentMethods({
+          fiat: m.fiat || { enabled: true },
+          crypto: m.crypto || { enabled: true },
+        });
+        if (m.fiat?.enabled === false && m.crypto?.enabled) {
+          setPaymentMode('crypto');
+        }
+      }
+    } catch (err) {
+      console.warn('[WalletScreen] fetch error:', err);
+    } finally {
+      clearTimeout(timeoutId);
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWalletData();
+  }, [fetchWalletData]);
+
+  // Automatically refresh balance & transactions when user returns from external checkout browser
+  const prevBalanceRef = useRef<number>(user?.balance || 0);
+  useEffect(() => {
+    prevBalanceRef.current = user?.balance || 0;
+  }, [user?.balance]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (nextState) => {
+      if (nextState === 'active') {
+        const beforeBal = prevBalanceRef.current;
+        await Promise.all([refreshUser(), fetchWalletData()]);
+        // Second check 2.5s later in case webhook is still settling
+        setTimeout(async () => {
+          await Promise.all([refreshUser(), fetchWalletData()]);
+        }, 2500);
+        if ((user?.balance || 0) > beforeBal) {
+          showToast('Wallet balance updated!', 'success');
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [refreshUser, fetchWalletData, showToast, user?.balance]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    triggerHaptic('light');
+    await Promise.all([fetchWalletData(), refreshUser()]);
+    setRefreshing(false);
+  };
+
+  const handleDeposit = async () => {
+    const numAmount = parseFloat(depositAmount);
+    if (!numAmount || numAmount <= 0) {
+      showDialog({
+        title: 'Invalid Amount',
+        message: 'Please enter a valid deposit amount greater than zero.',
+        variant: 'warning',
+        confirmText: 'Got It',
+      });
+      return;
+    }
+
+    if (paymentMode === 'fiat' && paymentMethods.fiat?.enabled === false) {
+      showDialog({
+        title: 'Card / Bank Unavailable',
+        message:
+          paymentMethods.fiat.reason ||
+          'Card and bank deposits are temporarily unavailable. Please try Crypto.',
+        variant: 'warning',
+        confirmText: 'Switch to Crypto',
+        onConfirm: () => setPaymentMode('crypto'),
+      });
+      return;
+    }
+
+    if (paymentMode === 'crypto' && paymentMethods.crypto?.enabled === false) {
+      showDialog({
+        title: 'Crypto Unavailable',
+        message:
+          paymentMethods.crypto.reason ||
+          'Crypto deposits are not currently enabled for your account.',
+        variant: 'warning',
+        confirmText: 'Switch to Card / Bank',
+        onConfirm: () => setPaymentMode('fiat'),
+      });
+      return;
+    }
+
+    setProcessingDeposit(true);
+    triggerHaptic('medium');
+
+    try {
+      let res;
+      if (paymentMode === 'fiat') {
+        // Matches frontend-globeverify WalletPage.tsx -> POST /payments/top-up
+        res = await apiClient.post('/payments/top-up', {
+          amount: numAmount,
+          currency: displayCurrency,
+        });
+      } else {
+        // Matches frontend-globeverify WalletPage.tsx -> POST /payments/crypto/top-up
+        res = await apiClient.post('/payments/crypto/top-up', {
+          amount: numAmount,
+          sourceCurrency: isUserNgn ? 'NGN' : 'USD',
+          isNgnAmount: isUserNgn,
+        });
+      }
+
+      const checkoutUrl =
+        res.data?.authorizationUrl ||
+        res.data?.checkoutUrl ||
+        res.data?.data?.checkoutUrl ||
+        res.data?.data?.authorizationUrl ||
+        res.data?.data?.paymentUrl;
+
+      if (checkoutUrl) {
+        showToast(
+          paymentMode === 'crypto'
+            ? 'Opening secure crypto checkout...'
+            : 'Opening secure payment checkout...',
+          'success'
+        );
+        await Linking.openURL(checkoutUrl);
+      } else {
+        showDialog({
+          title: 'Payment Initialized',
+          message:
+            res.data?.message ||
+            'Your deposit request was created. Complete your payment in the browser window.',
+          variant: 'success',
+          confirmText: 'Done',
+        });
+      }
+    } catch (err: any) {
+      const errMsg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        'Payment initiation failed. Please check your connection and try again.';
+      showDialog({
+        title: 'Deposit Notice',
+        message: errMsg,
+        variant: 'danger',
+        confirmText: 'Try Again',
+      });
+    } finally {
+      setProcessingDeposit(false);
+    }
+  };
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((tx) => {
+      const t = (tx.type || '').toLowerCase();
+      const isCredit = ['deposit', 'refund', 'referral_bonus', 'admin_credit'].includes(t);
+
+      if (txFilter === 'credit' && !isCredit) return false;
+      if (txFilter === 'debit' && isCredit) return false;
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const desc = (tx.description || '').toLowerCase();
+        return desc.includes(q) || t.includes(q);
+      }
+      return true;
+    });
+  }, [transactions, txFilter, searchQuery]);
+
+  const handleSelectNavTab = (tab: NavTabId) => {
+    if (tab === 'home') onNavigateToHome?.();
+    else if (tab === 'buy') onNavigateToBuy?.();
+    else if (tab === 'sms') onNavigateToNumbers?.();
+    else if (tab === 'rentals') onNavigateToRentals?.();
+    else if (tab === 'more') onNavigateToMore?.();
+  };
+
+  return (
+    <SafeAreaView style={[s.safeArea, { backgroundColor: colors.bg }]} edges={['top']}>
+      <StatusBar style={colors.statusBar} />
+
+      <ModernHeader
+        title="Wallet"
+        onBack={onBack}
+        onRefresh={onRefresh}
+        isRefreshing={refreshing}
+        onPressProfile={onNavigateToMore}
+      />
 
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 90 }]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFFFFF" />}
+        style={s.scroll}
+        contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
+        }
       >
-        {/* Hero Balance Card */}
-        <View style={styles.balanceCard}>
-          <View style={styles.balanceHeader}>
-            <Text style={styles.balanceLabel}>Available Balance</Text>
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.selectionAsync();
-                setHideBalance(!hideBalance);
-              }}
-              style={styles.eyeBtn}
+        <Animated.View
+          style={{
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+            gap: 24,
+          }}
+        >
+          {/* ── 1. WALLET & BALANCES (Single-Layer — Zero Nested Containers!) ── */}
+          <View style={s.sectionBlock}>
+            <Text style={[s.pageTitle, { color: colors.text }]}>
+              Wallet & Balances
+            </Text>
+            <Text style={[s.pageSubtitle, { color: colors.textMuted }]}>
+              Manage your funds, deposits, and transaction history
+            </Text>
+
+            <View
+              style={[
+                s.balanceStatBox,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
             >
-              {hideBalance ? <EyeOff size={16} color="#8E8E93" /> : <Eye size={16} color="#8E8E93" />}
-            </TouchableOpacity>
-          </View>
+              <View
+                style={[
+                  s.balanceIconSquare,
+                  {
+                    backgroundColor: colors.isDark
+                      ? 'rgba(59, 130, 246, 0.14)'
+                      : '#E0EAFF',
+                  },
+                ]}
+              >
+                <Wallet size={21} color="#2563EB" strokeWidth={2.1} />
+              </View>
 
-          <Text style={styles.primaryBalance} numberOfLines={1} adjustsFontSizeToFit>
-            {hideBalance ? '••••••••' : primaryBalanceFormatted}
-          </Text>
-
-          <Text style={styles.secondaryBalance}>
-            {hideBalance ? '••••••' : secondaryBalanceFormatted}
-          </Text>
-
-          {/* Action Buttons */}
-          <View style={styles.heroActionRow}>
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.selectionAsync();
-                setShowDepositModal(true);
-              }}
-              style={styles.primaryDepositBtn}
-              activeOpacity={0.85}
-            >
-              <Plus size={16} color="#000000" />
-              <Text style={styles.primaryDepositBtnText}>Deposit Funds</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.selectionAsync();
-                setShowCreditsModal(true);
-              }}
-              style={styles.secondaryCreditsBtn}
-              activeOpacity={0.8}
-            >
-              <Zap size={14} color="#FFFFFF" />
-              <Text style={styles.secondaryCreditsBtnText}>Credits: ${credits.toFixed(2)}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Transaction History Section */}
-        <View style={styles.historySection}>
-          <View style={styles.historyHeader}>
-            <Text style={styles.historyTitle}>Activity</Text>
-          </View>
-
-          {/* Filter Segmented Track */}
-          <View style={styles.filterTrack}>
-            {(['all', 'deposits', 'purchases', 'refunds'] as const).map((tab) => {
-              const isActive = filterTab === tab;
-              const labels = {
-                all: 'All',
-                deposits: 'Deposits',
-                purchases: 'Purchases',
-                refunds: 'Refunds',
-              };
-              return (
-                <TouchableOpacity
-                  key={tab}
-                  onPress={() => {
-                    Haptics.selectionAsync();
-                    setFilterTab(tab);
-                  }}
-                  style={[styles.filterChip, isActive && styles.filterChipActive]}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
-                    {labels[tab]}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {/* List or Skeleton */}
-          {loading ? (
-            <View style={{ gap: 8, marginTop: 12 }}>
-              <SkeletonListItem />
-              <SkeletonListItem />
-              <SkeletonListItem />
-              <SkeletonListItem />
-              <SkeletonListItem />
-            </View>
-          ) : filteredTransactions.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No Transactions Yet</Text>
-              <Text style={styles.emptySubtitle}>
-                Your deposits, number purchases, and automatic refunds will appear here.
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.transactionsList}>
-              {filteredTransactions.map((tx) => {
-                const isDeposit = tx.type === 'deposit' || tx.type === 'topup';
-                const isRefund = tx.type === 'refund';
-                const isPositive = isDeposit || isRefund;
-
-                const dateStr = tx.createdAt
-                  ? new Date(tx.createdAt).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })
-                  : 'Recent';
-
-                return (
-                  <View key={tx.id || Math.random().toString()} style={styles.txItem}>
-                    <View style={styles.txLeft}>
-                      <View
-                        style={[
-                          styles.txIconCircle,
-                          isPositive ? styles.txIconPositive : styles.txIconNegative,
-                        ]}
-                      >
-                        {isDeposit ? (
-                          <ArrowDownLeft size={16} color="#22C55E" />
-                        ) : isRefund ? (
-                          <RotateCcw size={14} color="#22C55E" />
-                        ) : (
-                          <ArrowUpRight size={16} color="#FFFFFF" />
-                        )}
-                      </View>
-
-                      <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={styles.txDescription} numberOfLines={1}>
-                          {tx.description || (isDeposit ? 'Deposit' : isRefund ? 'Refund' : 'Number Purchase')}
-                        </Text>
-                        <Text style={styles.txDate}>{dateStr}</Text>
-                      </View>
-                    </View>
-
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text
-                        style={[
-                          styles.txAmount,
-                          isPositive ? styles.txAmountPositive : styles.txAmountNegative,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {isPositive ? '+' : '-'}
-                        {formatCurrency(Math.abs(tx.amount), currency)}
-                      </Text>
-                      {tx.status && tx.status !== 'completed' && (
-                        <Text style={styles.txStatusBadge}>{tx.status}</Text>
-                      )}
+              <View style={s.balanceCenterCol}>
+                <Text style={[s.availLabel, { color: colors.textMuted }]}>
+                  AVAILABLE BALANCE
+                </Text>
+                {loading ? (
+                  <Skeleton width={120} height={24} borderRadius={6} style={{ marginTop: 4 }} />
+                ) : (
+                  <View style={s.balanceValRow}>
+                    <Text
+                      style={[s.balanceValText, { color: colors.text }]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                    >
+                      {balanceHidden ? '••••••••' : `${userSymbol}${balanceFormattedNum}`}
+                    </Text>
+                    <View
+                      style={[
+                        s.currBadge,
+                        {
+                          backgroundColor: colors.isDark
+                            ? 'rgba(59, 130, 246, 0.18)'
+                            : '#DBEAFE',
+                        },
+                      ]}
+                    >
+                      <Text style={s.currBadgeText}>{displayCurrency}</Text>
                     </View>
                   </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
-      </ScrollView>
-
-      {/* ─── MODAL: Deposit Funds ────────────────────────────────────────────── */}
-      <Modal visible={showDepositModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Deposit Funds</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setShowDepositModal(false);
-                  setCryptoAddressData(null);
-                }}
-                style={{ padding: 4 }}
-              >
-                <X size={18} color="#8E8E93" />
-              </TouchableOpacity>
-            </View>
-
-            {cryptoAddressData ? (
-              /* Crypto Address Generated View */
-              <View style={{ gap: 14 }}>
-                <Text style={styles.modalDesc}>
-                  Send precisely the required amount of{' '}
-                  <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>
-                    {cryptoAddressData.currency} ({cryptoAddressData.network})
-                  </Text>{' '}
-                  to the address below:
-                </Text>
-
-                <View style={styles.cryptoBox}>
-                  <Text style={styles.cryptoAddressText} numberOfLines={2} selectable>
-                    {cryptoAddressData.address}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => handleCopy(cryptoAddressData.address, 'crypto_addr')}
-                    style={styles.copyCryptoBtn}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.copyCryptoBtnText}>
-                      {copiedKey === 'crypto_addr' ? 'Copied' : 'Copy Address'}
-                    </Text>
-                    {copiedKey === 'crypto_addr' ? (
-                      <Check size={14} color="#000000" />
-                    ) : (
-                      <Copy size={14} color="#000000" />
-                    )}
-                  </TouchableOpacity>
-                </View>
-
-                {cryptoAddressData.checkoutUrl && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      if (cryptoAddressData.checkoutUrl) {
-                        Linking.openURL(cryptoAddressData.checkoutUrl);
-                      }
-                    }}
-                    style={styles.hostedCheckoutBtn}
-                  >
-                    <Text style={styles.hostedCheckoutBtnText}>Open Web Checkout Page</Text>
-                  </TouchableOpacity>
                 )}
-
-                <TouchableOpacity
-                  onPress={() => {
-                    setShowDepositModal(false);
-                    setCryptoAddressData(null);
-                    refreshUser();
-                  }}
-                  style={styles.modalActionBtn}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.modalActionBtnText}>Done</Text>
-                </TouchableOpacity>
               </View>
-            ) : (
-              /* Select Method & Amount View */
-              <View style={{ gap: 14 }}>
-                {/* Method Switcher */}
-                <View style={styles.methodSwitcher}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.selectionAsync();
-                      setDepositMethod('fiat');
-                    }}
-                    style={[styles.methodBtn, depositMethod === 'fiat' && styles.methodBtnActive]}
-                  >
-                    <Text
-                      style={[styles.methodBtnText, depositMethod === 'fiat' && styles.methodBtnTextActive]}
-                    >
-                      {currency === 'NGN' ? 'MarsPay / Bank Transfer' : 'Card / Bank'}
-                    </Text>
-                  </TouchableOpacity>
 
+              {settings.showDualCurrency && (
+                <View
+                  style={[
+                    s.dualRightCol,
+                    { borderLeftColor: colors.border },
+                  ]}
+                >
                   <TouchableOpacity
                     onPress={() => {
-                      Haptics.selectionAsync();
-                      setDepositMethod('crypto');
+                      triggerHaptic('selection');
+                      setDisplayCurrency('USD');
+                      setDepositAmount('10');
                     }}
-                    style={[styles.methodBtn, depositMethod === 'crypto' && styles.methodBtnActive]}
                   >
                     <Text
                       style={[
-                        styles.methodBtnText,
-                        depositMethod === 'crypto' && styles.methodBtnTextActive,
+                        s.dualLineText,
+                        {
+                          color:
+                            displayCurrency === 'USD'
+                              ? colors.primary
+                              : colors.textMuted,
+                        },
                       ]}
                     >
-                      Crypto (USDT / BTC)
+                      USD: {balanceHidden ? '•••' : `$${Number(usdBalance || 0).toFixed(2)}`}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => {
+                      triggerHaptic('selection');
+                      setDisplayCurrency('NGN');
+                      setDepositAmount('5000');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        s.dualLineText,
+                        {
+                          color:
+                            displayCurrency === 'NGN'
+                              ? colors.primary
+                              : colors.textMuted,
+                        },
+                      ]}
+                    >
+                      NGN:{' '}
+                      {balanceHidden
+                        ? '•••'
+                        : `₦${Number(ngnBalance || 0).toLocaleString(undefined, {
+                            maximumFractionDigits: 1,
+                          })}`}
                     </Text>
                   </TouchableOpacity>
                 </View>
-
-                {/* Amount Input */}
-                <View style={styles.amountInputWrap}>
-                  <Text style={styles.amountSymbol}>{currency === 'NGN' ? '₦' : '$'}</Text>
-                  <TextInput
-                    value={depositAmount}
-                    onChangeText={setDepositAmount}
-                    keyboardType="numeric"
-                    style={styles.amountInput}
-                    placeholder="10"
-                    placeholderTextColor="#666668"
-                  />
-                </View>
-
-                {/* Quick amount chips */}
-                <View style={styles.quickChipsRow}>
-                  {(currency === 'NGN' ? ['2000', '5000', '10000', '25000'] : ['10', '25', '50', '100']).map(
-                    (val) => (
-                      <TouchableOpacity
-                        key={val}
-                        onPress={() => {
-                          Haptics.selectionAsync();
-                          setDepositAmount(val);
-                        }}
-                        style={[styles.quickChip, depositAmount === val && styles.quickChipActive]}
-                      >
-                        <Text
-                          style={[
-                            styles.quickChipText,
-                            depositAmount === val && styles.quickChipTextActive,
-                          ]}
-                        >
-                          {currency === 'NGN' ? `₦${val}` : `$${val}`}
-                        </Text>
-                      </TouchableOpacity>
-                    )
-                  )}
-                </View>
-
-                <View style={styles.modalNotice}>
-                  <ShieldCheck size={14} color="#8E8E93" />
-                  <Text style={styles.modalNoticeText}>
-                    Funds are credited automatically upon blockchain/bank confirmation.
-                  </Text>
-                </View>
-
-                <TouchableOpacity
-                  onPress={handleInitiateDeposit}
-                  disabled={initiatingDeposit}
-                  style={[styles.modalActionBtn, initiatingDeposit && { opacity: 0.6 }]}
-                  activeOpacity={0.85}
-                >
-                  {initiatingDeposit ? (
-                    <ActivityIndicator size="small" color="#000000" />
-                  ) : (
-                    <Text style={styles.modalActionBtnText}>Proceed to Deposit</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* ─── MODAL: Telecom Credits ─────────────────────────────────────────── */}
-      <Modal visible={showCreditsModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Top Up Telecom Credits</Text>
-              <TouchableOpacity onPress={() => setShowCreditsModal(false)} style={{ padding: 4 }}>
-                <X size={18} color="#8E8E93" />
-              </TouchableOpacity>
+              )}
             </View>
+          </View>
 
-            <Text style={styles.modalDesc}>
-              Telecom credits power outbound SMS and phone forwarding on dedicated rental numbers.
+          {/* ── 2. ADD FUNDS / TOP UP (Standalone Gateway Cards — Matches Screenshot 2!) ── */}
+          <View style={s.sectionBlock}>
+            <Text style={[s.sectionTitle, { color: colors.text }]}>
+              Add Funds / Top Up
+            </Text>
+            <Text style={[s.pageSubtitle, { color: colors.textMuted }]}>
+              Choose your preferred payment method below to fund your account
             </Text>
 
-            <View style={styles.amountInputWrap}>
-              <Text style={styles.amountSymbol}>$</Text>
+            {/* Gateway Card 1: Naira (₦) Card / Bank Transfer */}
+            <TouchableOpacity
+              onPress={() => {
+                triggerHaptic('selection');
+                setPaymentMode('fiat');
+              }}
+              style={[
+                s.gatewayCard,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor:
+                    paymentMode === 'fiat' ? '#3B82F6' : colors.border,
+                  borderWidth: paymentMode === 'fiat' ? 1.5 : 1,
+                },
+              ]}
+              activeOpacity={0.85}
+            >
+              <View style={s.gatewayTopRow}>
+                <View
+                  style={[
+                    s.gatewayIconBox,
+                    {
+                      backgroundColor: colors.isDark
+                        ? 'rgba(59, 130, 246, 0.14)'
+                        : '#E0EAFF',
+                    },
+                  ]}
+                >
+                  <CreditCard size={18} color="#2563EB" strokeWidth={2.1} />
+                </View>
+
+                {paymentMode === 'fiat' ? (
+                  <View style={s.activeGreenPill}>
+                    <Text style={s.activeGreenPillText}>ACTIVE</Text>
+                  </View>
+                ) : (
+                  <Text style={[s.selectLabelText, { color: colors.textMuted }]}>
+                    SELECT
+                  </Text>
+                )}
+              </View>
+
+              <Text style={[s.gatewayTitle, { color: colors.text }]}>
+                {isUserNgn
+                  ? 'Naira (₦) Card / Bank Transfer'
+                  : 'Debit/Credit Card & Bank'}
+              </Text>
+              <Text style={[s.gatewayDesc, { color: colors.textMuted }]}>
+                {isUserNgn
+                  ? 'Pay instantly with Nigerian ATM cards, USSD, or direct bank transfer.'
+                  : 'Instant local and international card payments via secure gateway.'}
+              </Text>
+
+              <View style={[s.gatewayFooter, { borderTopColor: colors.border }]}>
+                <Text style={[s.gatewayFooterLeft, { color: colors.text }]}>
+                  {isUserNgn ? 'NG NGN (Naira)' : `${displayCurrency} Card`}
+                </Text>
+                <Text style={s.instantCheckoutText}>Instant Checkout ⚡</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Gateway Card 2: Cryptocurrency Gateway */}
+            <TouchableOpacity
+              onPress={() => {
+                triggerHaptic('selection');
+                setPaymentMode('crypto');
+              }}
+              style={[
+                s.gatewayCard,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor:
+                    paymentMode === 'crypto' ? '#8B5CF6' : colors.border,
+                  borderWidth: paymentMode === 'crypto' ? 1.5 : 1,
+                },
+              ]}
+              activeOpacity={0.85}
+            >
+              <View style={s.gatewayTopRow}>
+                <View
+                  style={[
+                    s.gatewayIconBox,
+                    {
+                      backgroundColor: colors.isDark
+                        ? 'rgba(139, 92, 246, 0.14)'
+                        : '#F3E8FF',
+                    },
+                  ]}
+                >
+                  <Coins size={18} color="#8B5CF6" strokeWidth={2.1} />
+                </View>
+
+                {paymentMode === 'crypto' ? (
+                  <View style={s.activeGreenPill}>
+                    <Text style={s.activeGreenPillText}>ACTIVE</Text>
+                  </View>
+                ) : (
+                  <Text style={[s.selectLabelText, { color: colors.textMuted }]}>
+                    SELECT
+                  </Text>
+                )}
+              </View>
+
+              <Text style={[s.gatewayTitle, { color: colors.text }]}>
+                Cryptocurrency Gateway
+              </Text>
+              <Text style={[s.gatewayDesc, { color: colors.textMuted }]}>
+                Pay with USDT, Bitcoin, TRON, Ethereum, Litecoin, SOL & more via secure hosted checkout.
+              </Text>
+
+              <View style={[s.gatewayFooter, { borderTopColor: colors.border }]}>
+                <Text style={[s.gatewayFooterLeft, { color: colors.text }]}>
+                  🌐 Multi-Chain Crypto
+                </Text>
+                <Text style={s.instantCheckoutText}>Instant Checkout ⚡</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Quick Select Presets */}
+            <View style={{ gap: 8, marginTop: 4 }}>
+              <Text style={[s.presetsLabel, { color: colors.textMuted }]}>
+                Quick select amount ({displayCurrency}):
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8 }}
+              >
+                {quickPresets.map((preset) => {
+                  const isSelected = parseFloat(depositAmount) === preset;
+                  return (
+                    <TouchableOpacity
+                      key={preset}
+                      onPress={() => {
+                        triggerHaptic('selection');
+                        setDepositAmount(String(preset));
+                      }}
+                      style={[
+                        s.presetChip,
+                        {
+                          backgroundColor: isSelected
+                            ? colors.primarySoft
+                            : colors.surface,
+                          borderColor: isSelected ? colors.primary : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          s.presetChipText,
+                          { color: isSelected ? colors.primary : colors.text },
+                        ]}
+                      >
+                        {userSymbol}
+                        {preset.toLocaleString()}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* Amount Input & Pay Button */}
+            <View style={{ gap: 10 }}>
+              <View
+                style={[
+                  s.amountInputRow,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text style={[s.inputPrefix, { color: colors.textMuted }]}>
+                  {userSymbol}
+                </Text>
+                <TextInput
+                  style={[s.amountInput, { color: colors.text }]}
+                  value={depositAmount}
+                  onChangeText={setDepositAmount}
+                  keyboardType="numeric"
+                  placeholder={`Enter amount in ${displayCurrency}`}
+                  placeholderTextColor={colors.textMuted}
+                />
+                <Text style={[s.inputSuffix, { color: colors.textMuted }]}>
+                  {displayCurrency}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  s.paySubmitBtn,
+                  {
+                    backgroundColor:
+                      paymentMode === 'crypto' ? '#7C3AED' : '#2563EB',
+                  },
+                  (!depositAmount ||
+                    parseFloat(depositAmount) <= 0 ||
+                    processingDeposit) && { opacity: 0.6 },
+                ]}
+                onPress={handleDeposit}
+                disabled={
+                  !depositAmount ||
+                  parseFloat(depositAmount) <= 0 ||
+                  processingDeposit
+                }
+                activeOpacity={0.85}
+              >
+                {processingDeposit ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    {paymentMode === 'crypto' ? (
+                      <Coins size={16} color="#FFFFFF" />
+                    ) : (
+                      <Zap size={16} color="#FFFFFF" />
+                    )}
+                    <Text style={s.paySubmitBtnText}>
+                      Pay{' '}
+                      {depositAmount && parseFloat(depositAmount) > 0
+                        ? `${userSymbol}${parseFloat(depositAmount).toLocaleString()}`
+                        : ''}{' '}
+                      with {paymentMode === 'crypto' ? 'Crypto' : 'Card / Bank'}
+                    </Text>
+                    <ArrowUpRight size={16} color="#FFFFFF" />
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* ── 3. TRANSACTION HISTORY (Clean Flat Divided List!) ─────────── */}
+          <View style={s.sectionBlock}>
+            <View style={s.txHeaderRow}>
+              <Text style={[s.sectionTitle, { color: colors.text }]}>
+                Transaction History
+              </Text>
+
+              <View style={s.txFilterPills}>
+                {(
+                  [
+                    { id: 'all', label: 'All' },
+                    { id: 'credit', label: 'In' },
+                    { id: 'debit', label: 'Out' },
+                  ] as const
+                ).map((f) => {
+                  const active = txFilter === f.id;
+                  return (
+                    <TouchableOpacity
+                      key={f.id}
+                      onPress={() => {
+                        triggerHaptic('selection');
+                        setTxFilter(f.id);
+                      }}
+                      style={[
+                        s.txFilterPill,
+                        active && { backgroundColor: colors.primarySoft },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          s.txFilterPillText,
+                          { color: active ? colors.primary : colors.textMuted },
+                          active && { fontWeight: '700' },
+                        ]}
+                      >
+                        {f.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View
+              style={[
+                s.searchRow,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Search size={15} color={colors.textMuted} />
               <TextInput
-                value={creditsAmount}
-                onChangeText={setCreditsAmount}
-                keyboardType="numeric"
-                style={styles.amountInput}
-                placeholder="5"
-                placeholderTextColor="#666668"
+                style={[s.searchInput, { color: colors.text }]}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search activity..."
+                placeholderTextColor={colors.textMuted}
               />
             </View>
 
-            <TouchableOpacity
-              onPress={handleTopupCredits}
-              disabled={toppingUpCredits}
-              style={[styles.modalActionBtn, toppingUpCredits && { opacity: 0.6 }]}
-              activeOpacity={0.85}
-            >
-              {toppingUpCredits ? (
-                <ActivityIndicator size="small" color="#000000" />
-              ) : (
-                <Text style={styles.modalActionBtnText}>Pay with Wallet Balance</Text>
-              )}
-            </TouchableOpacity>
+            {loading ? (
+              <View style={{ gap: 8 }}>
+                <SkeletonListItem />
+                <SkeletonListItem />
+              </View>
+            ) : filteredTransactions.length === 0 ? (
+              <AnimatedEmptyState
+                type="transactions"
+                title="No Transactions Yet"
+                subtitle={
+                  searchQuery.trim()
+                    ? 'No wallet transactions matched your search filter.'
+                    : "You haven't made any deposits or purchases yet. Fund your wallet above to get started."
+                }
+              />
+            ) : (
+              <View
+                style={[
+                  s.txFlatList,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                {filteredTransactions.map((tx, idx) => {
+                  const t = (tx.type || '').toLowerCase();
+                  const isCredit = [
+                    'deposit',
+                    'refund',
+                    'referral_bonus',
+                    'admin_credit',
+                  ].includes(t);
+                  const isRefund = t === 'refund';
+                  const txCurr = (
+                    tx.currency?.toUpperCase() === 'NGN' ? 'NGN' : displayCurrency
+                  ) as 'NGN' | 'USD';
+
+                  return (
+                    <View
+                      key={tx.id || tx._id || idx}
+                      style={[
+                        s.txFlatRow,
+                        idx > 0 && {
+                          borderTopWidth: 1,
+                          borderTopColor: colors.border,
+                        },
+                      ]}
+                    >
+                      {isRefund ? (
+                        <RotateCcw size={17} color={colors.warning} />
+                      ) : isCredit ? (
+                        <ArrowDownLeft size={17} color={colors.success} />
+                      ) : (
+                        <ArrowUpRight size={17} color={colors.textMuted} />
+                      )}
+
+                      <View style={s.txMidCol}>
+                        <Text
+                          style={[s.txTitle, { color: colors.text }]}
+                          numberOfLines={1}
+                        >
+                          {tx.description || tx.type.replace(/_/g, ' ')}
+                        </Text>
+                        <Text style={[s.txSub, { color: colors.textMuted }]}>
+                          {formatDateShort(tx.createdAt)}
+                        </Text>
+                      </View>
+
+                      <Text
+                        style={[
+                          s.txAmount,
+                          { color: isCredit ? colors.success : colors.text },
+                        ]}
+                      >
+                        {balanceHidden
+                          ? '••••'
+                          : `${isCredit ? '+' : '-'}${formatCurrency(
+                              tx.amount,
+                              txCurr
+                            )}`}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </View>
-        </View>
-      </Modal>
+        </Animated.View>
 
-      {/* ─── BOTTOM NAVIGATION BAR ───────────────────────────────────────────── */}
-      <View style={[styles.bottomNavContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => {
-            Haptics.selectionAsync();
-            onNavigateToHome?.();
-          }}
-          activeOpacity={0.7}
-        >
-          <Home size={20} color="#8E8E93" />
-          <Text style={styles.navLabel}>Home</Text>
-        </TouchableOpacity>
+        <View style={{ height: 100 }} />
+      </ScrollView>
 
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => {
-            Haptics.selectionAsync();
-            onNavigateToBuy?.();
-          }}
-          activeOpacity={0.7}
-        >
-          <ShoppingCart size={20} color="#8E8E93" />
-          <Text style={styles.navLabel}>Buy</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => {
-            Haptics.selectionAsync();
-            onNavigateToNumbers?.();
-          }}
-          activeOpacity={0.7}
-        >
-          <MessageSquare size={20} color="#8E8E93" />
-          <Text style={styles.navLabel}>My SMS</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() => {
-            Haptics.selectionAsync();
-            onNavigateToRentals?.();
-          }}
-          activeOpacity={0.7}
-        >
-          <Repeat size={20} color="#8E8E93" />
-          <Text style={styles.navLabel}>Rentals</Text>
-        </TouchableOpacity>
-
-        {/* Active: Wallet */}
-        <TouchableOpacity style={styles.navItem} activeOpacity={1}>
-          <WalletIcon size={20} color="#FFFFFF" />
-          <Text style={[styles.navLabel, styles.navLabelActive]}>Wallet</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+      <ModernBottomNav activeTab="wallet" onSelectTab={handleSelectNavTab} />
+    </SafeAreaView>
   );
 };
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  root: {
+const s = StyleSheet.create({
+  safeArea: {
     flex: 1,
-    backgroundColor: '#080808',
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: PAD,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#161618',
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  backButton: {
-    padding: 4,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: -0.4,
-  },
-  currencyToggleBtn: {
-    backgroundColor: '#161618',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#242426',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  currencyToggleText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  scrollView: {
+  scroll: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: PAD,
-    paddingTop: 16,
+    paddingTop: 8,
   },
-  balanceCard: {
-    backgroundColor: '#121214',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#1E1E20',
-    padding: 20,
-    marginBottom: 24,
-  },
-  balanceHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  balanceLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#8E8E93',
-  },
-  eyeBtn: {
-    padding: 4,
-  },
-  primaryBalance: {
-    fontSize: 34,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: -0.8,
-    marginBottom: 4,
-  },
-  secondaryBalance: {
-    fontSize: 13,
-    color: '#8E8E93',
-    marginBottom: 18,
-  },
-  heroActionRow: {
-    flexDirection: 'row',
+  sectionBlock: {
     gap: 10,
   },
-  primaryDepositBtn: {
-    flex: 1.2,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    gap: 6,
+  pageTitle: {
+    fontSize: 23,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
-  primaryDepositBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#000000',
-  },
-  secondaryCreditsBtn: {
-    flex: 1,
-    backgroundColor: '#18181A',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#242426',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    gap: 6,
-  },
-  secondaryCreditsBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  historySection: {
-    marginTop: 4,
-  },
-  historyHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  historyTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#FFFFFF',
+  sectionTitle: {
+    fontSize: 19,
+    fontWeight: '800',
     letterSpacing: -0.3,
   },
-  filterTrack: {
+  pageSubtitle: {
+    fontSize: 13.5,
+    lineHeight: 19,
+    marginTop: -4,
+    marginBottom: 4,
+  },
+
+  // 1. Balance Stat Box (Matches Screenshot 2)
+  balanceStatBox: {
     flexDirection: 'row',
-    backgroundColor: '#121214',
-    borderRadius: 10,
+    alignItems: 'center',
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#1E1E20',
-    padding: 3,
-    marginBottom: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    gap: 12,
   },
-  filterChip: {
+  balanceIconSquare: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  balanceCenterCol: {
     flex: 1,
-    paddingVertical: 6,
+    gap: 2,
+  },
+  availLabel: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  balanceValRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  balanceValText: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  currBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
+  currBadgeText: {
+    color: '#2563EB',
+    fontSize: 10.5,
+    fontWeight: '800',
+  },
+  dualRightCol: {
+    borderLeftWidth: 1,
+    paddingLeft: 12,
+    gap: 4,
+  },
+  dualLineText: {
+    fontSize: 11,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+
+  // 2. Gateway Cards (Matches Screenshot 2)
+  gatewayCard: {
+    borderRadius: 18,
+    padding: 18,
+    gap: 6,
+  },
+  gatewayTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  gatewayIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 7,
   },
-  filterChipActive: {
-    backgroundColor: '#FFFFFF',
+  activeGreenPill: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 11,
+    paddingVertical: 4,
+    borderRadius: 999,
   },
-  filterChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#8E8E93',
-  },
-  filterChipTextActive: {
-    color: '#000000',
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 50,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+  activeGreenPillText: {
     color: '#FFFFFF',
-    marginBottom: 6,
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.6,
   },
-  emptySubtitle: {
+  selectLabelText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+  },
+  gatewayTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  gatewayDesc: {
     fontSize: 13,
-    color: '#8E8E93',
-    textAlign: 'center',
+    lineHeight: 19,
+    marginBottom: 10,
   },
-  transactionsList: {
-    gap: 8,
+  gatewayFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    borderTopWidth: 1,
   },
-  txItem: {
-    backgroundColor: '#121214',
+  gatewayFooterLeft: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  instantCheckoutText: {
+    color: '#10B981',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  // Presets & Input
+  presetsLabel: {
+    fontSize: 12.5,
+    fontWeight: '600',
+  },
+  presetChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 11,
+    borderWidth: 1,
+  },
+  presetChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  amountInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#1E1E20',
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    height: 50,
   },
-  txLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  txIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  txIconPositive: {
-    backgroundColor: 'rgba(34, 197, 94, 0.12)',
-  },
-  txIconNegative: {
-    backgroundColor: '#1E1E22',
-  },
-  txDescription: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 2,
-  },
-  txDate: {
-    fontSize: 11,
-    color: '#8E8E93',
-  },
-  txAmount: {
-    fontSize: 14,
+  inputPrefix: {
+    fontSize: 16,
     fontWeight: '700',
-  },
-  txAmountPositive: {
-    color: '#22C55E',
-  },
-  txAmountNegative: {
-    color: '#FFFFFF',
-  },
-  txStatusBadge: {
-    fontSize: 10,
-    color: '#8E8E93',
-    textTransform: 'uppercase',
-    marginTop: 2,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    justifyContent: 'center',
-    paddingHorizontal: PAD,
-  },
-  modalCard: {
-    backgroundColor: '#121214',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#222224',
-    padding: 20,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: -0.3,
-  },
-  modalDesc: {
-    fontSize: 13,
-    color: '#8E8E93',
-    lineHeight: 18,
-  },
-  methodSwitcher: {
-    flexDirection: 'row',
-    backgroundColor: '#18181A',
-    borderRadius: 10,
-    padding: 3,
-  },
-  methodBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: 7,
-  },
-  methodBtnActive: {
-    backgroundColor: '#FFFFFF',
-  },
-  methodBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#8E8E93',
-  },
-  methodBtnTextActive: {
-    color: '#000000',
-  },
-  amountInputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#18181A',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#242426',
-    paddingHorizontal: 16,
-    height: 52,
-  },
-  amountSymbol: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginRight: 8,
+    marginRight: 6,
   },
   amountInput: {
     flex: 1,
-    fontSize: 22,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#FFFFFF',
   },
-  quickChipsRow: {
+  inputSuffix: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 6,
+  },
+  paySubmitBtn: {
     flexDirection: 'row',
-    gap: 8,
-  },
-  quickChip: {
-    flex: 1,
-    backgroundColor: '#18181A',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#242426',
-    paddingVertical: 8,
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 50,
+    borderRadius: 14,
   },
-  quickChipActive: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#FFFFFF',
+  paySubmitBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14.5,
+    fontWeight: '800',
   },
-  quickChipText: {
+
+  // 3. Transaction History (Flat Divided List)
+  txHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  txFilterPills: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  txFilterPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  txFilterPillText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#8E8E93',
   },
-  quickChipTextActive: {
-    color: '#000000',
-  },
-  modalNotice: {
+  searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    borderRadius: 13,
+    borderWidth: 1,
+    paddingHorizontal: 13,
+    height: 44,
     gap: 8,
-    backgroundColor: '#18181A',
-    borderRadius: 10,
-    padding: 10,
   },
-  modalNoticeText: {
-    fontSize: 11,
-    color: '#8E8E93',
+  searchInput: {
     flex: 1,
-    lineHeight: 15,
+    fontSize: 13.5,
   },
-  modalActionBtn: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+  emptyBox: {
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingVertical: 32,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyText: {
+    fontSize: 13.5,
+  },
+  txFlatList: {
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  txFlatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 6,
+    paddingHorizontal: 16,
+    gap: 12,
   },
-  modalActionBtnText: {
+  txMidCol: {
+    flex: 1,
+    gap: 2,
+  },
+  txTitle: {
     fontSize: 14,
-    fontWeight: '700',
-    color: '#000000',
-  },
-  cryptoBox: {
-    backgroundColor: '#18181A',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#242426',
-    padding: 14,
-    alignItems: 'center',
-  },
-  cryptoAddressText: {
-    fontSize: 13,
-    color: '#FFFFFF',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  copyCryptoBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  copyCryptoBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#000000',
-  },
-  hostedCheckoutBtn: {
-    backgroundColor: '#18181A',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#242426',
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  hostedCheckoutBtnText: {
-    fontSize: 13,
     fontWeight: '600',
-    color: '#FFFFFF',
+    textTransform: 'capitalize',
   },
-  bottomNavContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#080808',
-    borderTopWidth: 1,
-    borderTopColor: '#1A1A1C',
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingTop: 8,
+  txSub: {
+    fontSize: 12,
   },
-  navItem: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 4,
-    minWidth: 54,
-  },
-  navLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: '#8E8E93',
-    marginTop: 4,
-  },
-  navLabelActive: {
-    color: '#FFFFFF',
+  txAmount: {
+    fontSize: 14,
     fontWeight: '700',
   },
 });
