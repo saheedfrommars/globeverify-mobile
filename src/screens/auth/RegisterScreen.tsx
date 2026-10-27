@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   Pressable,
   Linking,
   Alert,
+  Modal,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import {
@@ -27,7 +28,11 @@ import {
   CountryItem,
   COUNTRIES,
 } from '../../components/ui/CountryPickerModal';
+import { LegalScreen } from '../legal/LegalScreen';
 import apiClient from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
+import { signInWithGoogle } from '../../services/googleAuth';
+import { getPendingReferral, clearPendingReferral } from '../../services/deepLinkService';
 
 export interface RegisterScreenProps {
   onNavigateToLogin: () => void;
@@ -48,9 +53,24 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   const [referralCode, setReferralCode] = useState('');
   const [showReferralInput, setShowReferralInput] = useState(false);
   const [isCountryModalVisible, setIsCountryModalVisible] = useState(false);
+  const [legalModal, setLegalModal] = useState<{ visible: boolean; tab: 'terms' | 'privacy' }>({
+    visible: false,
+    tab: 'terms',
+  });
 
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const { login } = useAuth();
+
+  // Prefill referral code from a referral link (e.g. globeverify.com/auth/register?ref=CODE)
+  useEffect(() => {
+    getPendingReferral().then((code) => {
+      if (code) {
+        setReferralCode(code);
+        setShowReferralInput(true);
+      }
+    });
+  }, []);
 
   const handleSubmit = async () => {
     if (!name.trim() || !email.trim() || !password) {
@@ -86,6 +106,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
       };
 
       await apiClient.post('/auth/register', payload);
+      await clearPendingReferral();
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onNavigateToOtp({
@@ -103,16 +124,15 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   };
 
   const handleGoogleAuth = async () => {
-    try {
-      const googleUrl = 'https://api.globeverify.com/api/auth/google';
-      const supported = await Linking.canOpenURL(googleUrl);
-      if (supported) {
-        await Linking.openURL(googleUrl);
-      } else {
-        Alert.alert('Google Sign-Up', 'Redirecting to GlobeVerify Google OAuth authentication.');
-      }
-    } catch {
-      Alert.alert('Notice', 'Google Authentication is currently configuring for native redirect.');
+    setErrorMessage('');
+    const result = await signInWithGoogle();
+    if (result.type === 'success') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await login(result.token, result.user);
+      await clearPendingReferral();
+    } else if (result.type === 'error') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(result.message);
     }
   };
 
@@ -306,6 +326,33 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
         style={styles.submitBtn}
       />
 
+      {/* Legal Agreement Footer */}
+      <View style={styles.termsAgreementWrap}>
+        <Text style={[styles.termsAgreementText, { color: colors.textSecondary }]}>
+          By creating an account, you agree to our{' '}
+          <Text
+            style={[styles.termsLink, { color: colors.primary }]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setLegalModal({ visible: true, tab: 'terms' });
+            }}
+          >
+            Terms of Service
+          </Text>
+          {' '}and{' '}
+          <Text
+            style={[styles.termsLink, { color: colors.primary }]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setLegalModal({ visible: true, tab: 'privacy' });
+            }}
+          >
+            Privacy Policy
+          </Text>
+          .
+        </Text>
+      </View>
+
       {/* Country Picker Modal */}
       <CountryPickerModal
         visible={isCountryModalVisible}
@@ -313,6 +360,20 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
         selectedCode={selectedCountry.code}
         onSelectCountry={(country) => setSelectedCountry(country)}
       />
+
+      {/* In-App Legal Terms & Privacy Modal */}
+      <Modal
+        visible={legalModal.visible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setLegalModal((prev) => ({ ...prev, visible: false }))}
+      >
+        <LegalScreen
+          isModal
+          initialTab={legalModal.tab}
+          onBack={() => setLegalModal((prev) => ({ ...prev, visible: false }))}
+        />
+      </Modal>
     </AuthLayout>
   );
 };
@@ -368,5 +429,20 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     marginTop: 8,
+  },
+  termsAgreementWrap: {
+    marginTop: 14,
+    marginBottom: 6,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  termsAgreementText: {
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  termsLink: {
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
 });

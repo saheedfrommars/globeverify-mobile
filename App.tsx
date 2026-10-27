@@ -1,4 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import * as Linking from 'expo-linking';
+import {
+  parseDeepLink,
+  savePendingReferral,
+  clearPendingReferral,
+  markDeepLinkScreenLaunch,
+} from './src/services/deepLinkService';
+import { setupNotificationResponseListener } from './src/services/pushNotificationService';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
@@ -19,6 +27,7 @@ import { CustomizationScreen } from './src/screens/customization/CustomizationSc
 import { AffiliateScreen } from './src/screens/affiliate/AffiliateScreen';
 import { DeveloperScreen } from './src/screens/developer/DeveloperScreen';
 import { SupportScreen } from './src/screens/support/SupportScreen';
+import { LegalScreen } from './src/screens/legal/LegalScreen';
 import { VeraSupportChat } from './src/components/ui/VeraSupportChat';
 import { View, Text, StyleSheet } from 'react-native';
 import { Button } from './src/components/ui/Button';
@@ -32,7 +41,10 @@ type AuthStep =
   | 'otp'
   | 'forgot'
   | 'reset'
-  | 'dashboard';
+  | 'dashboard'
+  | 'terms'
+  | 'privacy'
+  | 'legal';
 
 type AuthenticatedScreen =
   | 'dashboard'
@@ -44,7 +56,10 @@ type AuthenticatedScreen =
   | 'customization'
   | 'affiliate'
   | 'developer'
-  | 'support';
+  | 'support'
+  | 'legal'
+  | 'terms'
+  | 'privacy';
 
 interface OtpState {
   email: string;
@@ -53,12 +68,89 @@ interface OtpState {
 }
 
 function MainNavigator() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, loginWithToken } = useAuth();
 
   const [currentStep, setCurrentStep] = useState<AuthStep>('onboarding');
   const [activeAppScreen, setActiveAppScreen] = useState<AuthenticatedScreen>('dashboard');
   const [otpParams, setOtpParams] = useState<OtpState>({ email: '', type: 'register' });
   const [resetEmail, setResetEmail] = useState('');
+
+  // ── Deep links (App Links / Universal Links / globeverify://) ──────────────
+  const isAuthedRef = useRef(false);
+  const pendingScreenRef = useRef<AuthenticatedScreen | null>(null);
+  isAuthedRef.current = Boolean(isAuthenticated && user);
+
+  useEffect(() => {
+    const handleUrl = async (url: string | null) => {
+      const link = parseDeepLink(url);
+      if (!link) return;
+
+      // If the link contains an auth token (e.g. from Google OAuth external return)
+      if (link.token) {
+        const authedUser = await loginWithToken(link.token);
+        if (authedUser) {
+          if (link.isNew) await clearPendingReferral();
+          if (pendingScreenRef.current) {
+            markDeepLinkScreenLaunch();
+            setActiveAppScreen(pendingScreenRef.current);
+            pendingScreenRef.current = null;
+          } else {
+            setActiveAppScreen('dashboard');
+          }
+          return;
+        }
+      }
+
+      if (link.isOAuthCallback) return; // OAuth return in in-app browser is handled by expo-web-browser
+
+      if (link.referralCode) {
+        await savePendingReferral(link.referralCode);
+      }
+
+      if (isAuthedRef.current) {
+        if (link.screen) {
+          markDeepLinkScreenLaunch();
+          setActiveAppScreen(link.screen as AuthenticatedScreen);
+        }
+        return;
+      }
+
+      if (!isAuthedRef.current && (link.screen === 'terms' || link.screen === 'privacy' || link.screen === 'legal')) {
+        setCurrentStep(link.screen as AuthStep);
+        return;
+      }
+
+      // Not signed in: remember where they wanted to go, then show the right auth screen
+      if (link.screen) pendingScreenRef.current = link.screen as AuthenticatedScreen;
+      if (link.authTarget) setCurrentStep(link.authTarget);
+      else if (link.screen) setCurrentStep('login');
+    };
+
+    Linking.getInitialURL().then(handleUrl).catch(() => {});
+    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    return () => sub.remove();
+  }, [loginWithToken]);
+
+  // ── Push Notification Tap Response ───────────────────────────────────────
+  useEffect(() => {
+    const unsub = setupNotificationResponseListener((screen) => {
+      if (isAuthedRef.current) {
+        setActiveAppScreen(screen);
+      } else {
+        pendingScreenRef.current = screen;
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // After sign-in, continue to the page the link pointed to
+  useEffect(() => {
+    if (isAuthenticated && user && pendingScreenRef.current) {
+      markDeepLinkScreenLaunch();
+      setActiveAppScreen(pendingScreenRef.current);
+      pendingScreenRef.current = null;
+    }
+  }, [isAuthenticated, user]);
 
   // If already authenticated, show the rich app screens wrapped with global AppSettings navigation
   if (isAuthenticated && user) {
@@ -162,6 +254,22 @@ function MainNavigator() {
           onNavigateToWallet={() => setActiveAppScreen('wallet')}
         />
       );
+    } else if (
+      activeAppScreen === 'legal' ||
+      activeAppScreen === 'terms' ||
+      activeAppScreen === 'privacy'
+    ) {
+      screenContent = (
+        <LegalScreen
+          initialTab={activeAppScreen === 'privacy' ? 'privacy' : 'terms'}
+          onBack={() => setActiveAppScreen('more')}
+          onNavigateToHome={() => setActiveAppScreen('dashboard')}
+          onNavigateToBuy={() => setActiveAppScreen('buy-number')}
+          onNavigateToNumbers={() => setActiveAppScreen('numbers')}
+          onNavigateToRentals={() => setActiveAppScreen('rentals')}
+          onNavigateToWallet={() => setActiveAppScreen('wallet')}
+        />
+      );
     } else {
       screenContent = (
         <DashboardScreen
@@ -254,6 +362,17 @@ function MainNavigator() {
           email={resetEmail}
           onResetSuccess={() => setCurrentStep('login')}
           onBackToLogin={() => setCurrentStep('login')}
+        />
+      );
+
+    case 'terms':
+    case 'privacy':
+    case 'legal':
+      return (
+        <LegalScreen
+          isModal
+          initialTab={currentStep === 'privacy' ? 'privacy' : 'terms'}
+          onBack={() => setCurrentStep('login')}
         />
       );
 

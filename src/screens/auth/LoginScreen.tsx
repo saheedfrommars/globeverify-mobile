@@ -6,6 +6,7 @@ import {
   Pressable,
   Linking,
   Alert,
+  Modal,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Mail, Lock, AlertCircle, ArrowRight } from 'lucide-react-native';
@@ -14,8 +15,11 @@ import { AuthLayout } from './AuthLayout';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { GoogleButton } from '../../components/ui/GoogleButton';
+import { LegalScreen } from '../legal/LegalScreen';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../api/client';
+import { signInWithGoogle } from '../../services/googleAuth';
+import { clearPendingReferral } from '../../services/deepLinkService';
 
 export interface LoginScreenProps {
   onNavigateToRegister: () => void;
@@ -37,6 +41,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [legalModal, setLegalModal] = useState<{ visible: boolean; tab: 'terms' | 'privacy' }>({
+    visible: false,
+    tab: 'terms',
+  });
 
   const handleSubmit = async () => {
     if (!email.trim() || !password) {
@@ -86,16 +94,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   };
 
   const handleGoogleAuth = async () => {
-    try {
-      const googleUrl = 'https://api.globeverify.com/api/auth/google';
-      const supported = await Linking.canOpenURL(googleUrl);
-      if (supported) {
-        await Linking.openURL(googleUrl);
-      } else {
-        Alert.alert('Google Sign-In', 'Redirecting to GlobeVerify Google OAuth authentication.');
-      }
-    } catch {
-      Alert.alert('Notice', 'Google Authentication is currently configuring for native redirect.');
+    setErrorMessage('');
+    const result = await signInWithGoogle();
+    if (result.type === 'success') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await login(result.token, result.user);
+      if (result.isNew) await clearPendingReferral();
+      onLoginSuccess();
+    } else if (result.type === 'error') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(result.message);
     }
   };
 
@@ -222,6 +230,47 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
       {/* Google Authentication */}
       <GoogleButton onPress={handleGoogleAuth} />
+
+      {/* Legal Agreement / Compliance Notice */}
+      <View style={styles.termsAgreementWrap}>
+        <Text style={[styles.termsAgreementText, { color: colors.textSecondary }]}>
+          Protected by GlobeVerify Security. View{' '}
+          <Text
+            style={[styles.termsLink, { color: colors.primary }]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setLegalModal({ visible: true, tab: 'terms' });
+            }}
+          >
+            Terms of Service
+          </Text>
+          {' '}&{' '}
+          <Text
+            style={[styles.termsLink, { color: colors.primary }]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setLegalModal({ visible: true, tab: 'privacy' });
+            }}
+          >
+            Privacy Policy
+          </Text>
+          .
+        </Text>
+      </View>
+
+      {/* In-App Legal Terms & Privacy Modal */}
+      <Modal
+        visible={legalModal.visible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setLegalModal((prev) => ({ ...prev, visible: false }))}
+      >
+        <LegalScreen
+          isModal
+          initialTab={legalModal.tab}
+          onBack={() => setLegalModal((prev) => ({ ...prev, visible: false }))}
+        />
+      </Modal>
     </AuthLayout>
   );
 };
@@ -255,5 +304,20 @@ const styles = StyleSheet.create({
   dividerText: {
     paddingHorizontal: 12,
     letterSpacing: 1,
+  },
+  termsAgreementWrap: {
+    marginTop: 20,
+    marginBottom: 4,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  termsAgreementText: {
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  termsLink: {
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
 });

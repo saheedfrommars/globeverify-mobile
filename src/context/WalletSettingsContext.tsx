@@ -7,6 +7,7 @@ import {
   type DialogConfig,
   type ToastConfig,
 } from '../components/ui/CustomDialogModal';
+import { hasDeepLinkScreenLaunch } from '../services/deepLinkService';
 
 const STORAGE_KEY = 'gv_app_display_settings_v6';
 
@@ -22,7 +23,10 @@ export type AppScreenId =
   | 'customization'
   | 'affiliate'
   | 'developer'
-  | 'support';
+  | 'support'
+  | 'legal'
+  | 'terms'
+  | 'privacy';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -273,7 +277,7 @@ export const WalletSettingsProvider: React.FC<{
             },
           };
           setSettings(merged);
-          if (merged.defaultStartScreen && onNavigateScreen) {
+          if (merged.defaultStartScreen && onNavigateScreen && !hasDeepLinkScreenLaunch()) {
             onNavigateScreen(merged.defaultStartScreen);
           }
         }

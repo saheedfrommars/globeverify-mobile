@@ -1,25 +1,111 @@
 {
   "expo": {
-    "name": "mobile-globeverify",
+    "name": "GlobeVerify",
     "slug": "mobile-globeverify",
+    "scheme": "globeverify",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.globeverify.app",
+      "associatedDomains": [
+        "applinks:globeverify.com",
+        "applinks:www.globeverify.com"
+      ]
     },
     "android": {
+      "package": "com.globeverify.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "globeverify.com",
+              "pathPrefix": "/dashboard"
+            },
+            {
+              "scheme": "https",
+              "host": "www.globeverify.com",
+              "pathPrefix": "/dashboard"
+            },
+            {
+              "scheme": "https",
+              "host": "globeverify.com",
+              "pathPrefix": "/auth/register"
+            },
+            {
+              "scheme": "https",
+              "host": "www.globeverify.com",
+              "pathPrefix": "/auth/register"
+            },
+            {
+              "scheme": "https",
+              "host": "globeverify.com",
+              "pathPrefix": "/auth/login"
+            },
+            {
+              "scheme": "https",
+              "host": "www.globeverify.com",
+              "pathPrefix": "/auth/login"
+            },
+            {
+              "scheme": "https",
+              "host": "globeverify.com",
+              "pathPrefix": "/terms"
+            },
+            {
+              "scheme": "https",
+              "host": "www.globeverify.com",
+              "pathPrefix": "/terms"
+            },
+            {
+              "scheme": "https",
+              "host": "globeverify.com",
+              "pathPrefix": "/privacy"
+            },
+            {
+              "scheme": "https",
+              "host": "www.globeverify.com",
+              "pathPrefix": "/privacy"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#2563EB",
+          "sounds": []
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "be6c34d3-d767-4ef3-b8ef-b3ec98e8bd88"
+      }
+    },
+    "owner": "marswallet"
   }
 }

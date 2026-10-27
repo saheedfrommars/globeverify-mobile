@@ -48,6 +48,10 @@ import apiClient, {
   setCachedData,
 } from '../../api/client';
 import { socketService } from '../../services/socketService';
+import {
+  registerForPushNotificationsAsync,
+  unregisterPushNotificationsAsync,
+} from '../../services/pushNotificationService';
 
 // Module-level cache so switching screens never lags or resets the header badge!
 let cachedNotifications: NotificationItem[] = [];
@@ -128,6 +132,12 @@ const MATURE_DRAWER_SECTIONS: DrawerSection[] = [
         label: 'UI Customization Studio',
         screenId: 'customization',
         icon: Sparkles,
+      },
+      {
+        id: 'legal',
+        label: 'Terms & Privacy Policy',
+        screenId: 'legal',
+        icon: ShieldCheck,
       },
     ],
   },
@@ -446,6 +456,11 @@ const ModernHeaderComponent: React.FC<ModernHeaderProps> = ({
                   triggerHaptic('selection');
                   const nextMuted = !settings.soundMuted;
                   updateSetting('soundMuted', nextMuted);
+                  if (nextMuted) {
+                    unregisterPushNotificationsAsync().catch(() => {});
+                  } else {
+                    registerForPushNotificationsAsync().catch(() => {});
+                  }
                   showToast(
                     nextMuted
                       ? 'Push notifications disabled'

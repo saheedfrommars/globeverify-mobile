@@ -6,6 +6,10 @@ import apiClient, {
   setCachedAuthToken,
 } from '../api/client';
 import { socketService } from '../services/socketService';
+import {
+  registerForPushNotificationsAsync,
+  unregisterPushNotificationsAsync,
+} from '../services/pushNotificationService';
 
 export interface User {
   _id: string;
@@ -47,6 +51,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   loading: boolean;
   login: (token: string, userData: User) => Promise<void>;
+  loginWithToken: (newToken: string) => Promise<User | null>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   updateUser: (updated: Partial<User>) => Promise<void>;
@@ -127,8 +132,30 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const loginWithToken = async (newToken: string): Promise<User | null> => {
+    if (!newToken || typeof newToken !== 'string') return null;
+    setCachedAuthToken(newToken);
+    setToken(newToken);
+    try {
+      await SecureStore.setItemAsync('gv_auth_token', String(newToken));
+      const res = await apiClient.get('/auth/profile', {
+        headers: { Authorization: `Bearer ${newToken}` },
+      });
+      const profileUser = res.data?.data || res.data?.user || (res.data?._id ? res.data : null);
+      if (profileUser) {
+        setUser(profileUser);
+        await SecureStore.setItemAsync('gv_user_data', JSON.stringify(profileUser));
+        return profileUser;
+      }
+    } catch (err) {
+      console.warn('[AuthContext] loginWithToken failed to fetch profile:', err);
+    }
+    return null;
+  };
+
   const logout = async () => {
     socketService.disconnect();
+    unregisterPushNotificationsAsync().catch(() => {});
     setCachedAuthToken(null);
     setToken(null);
     setUser(null);
@@ -140,11 +167,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Connect real-time Socket.IO whenever authenticated user is present
+  // Connect real-time Socket.IO and register push token whenever authenticated user is present
   useEffect(() => {
     const uid = user?._id || user?.id;
     if (token && uid) {
       socketService.connect(uid);
+      registerForPushNotificationsAsync().catch(() => {});
     } else {
       socketService.disconnect();
     }
@@ -180,6 +208,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isAuthenticated: !!token && !!user,
         loading,
         login,
+        loginWithToken,
         logout,
         refreshUser,
         updateUser,

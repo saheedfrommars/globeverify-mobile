@@ -44,6 +44,7 @@ import {
   Users,
   Headphones,
   Code2,
+  FileText,
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
@@ -786,6 +787,8 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
               alignItems: 'center',
               paddingVertical: 12,
               paddingHorizontal: 14,
+              borderBottomWidth: StyleSheet.hairlineWidth,
+              borderBottomColor: colors.border,
               gap: 12,
             }}
           >
@@ -803,6 +806,39 @@ export const MoreScreen: React.FC<MoreScreenProps> = ({
               </Text>
               <Text style={[s.studioSub, { color: colors.textMuted }]}>
                 Generate secret API keys, configure webhook callbacks & monitor usage
+              </Text>
+            </View>
+            <ChevronRight size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => {
+              triggerHaptic('selection');
+              setActiveScreen('legal');
+            }}
+            activeOpacity={0.8}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: 12,
+              paddingHorizontal: 14,
+              gap: 12,
+            }}
+          >
+            <View
+              style={[
+                s.studioIconCircle,
+                { backgroundColor: colors.primarySoft, width: 38, height: 38, borderRadius: 10 },
+              ]}
+            >
+              <FileText size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.studioTitle, { color: colors.text, fontSize: 14 }]}>
+                Terms & Privacy Policy
+              </Text>
+              <Text style={[s.studioSub, { color: colors.textMuted }]}>
+                Read official terms of service, acceptable use, and privacy protection
               </Text>
             </View>
             <ChevronRight size={16} color={colors.textMuted} />
