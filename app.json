@@ -13,11 +13,19 @@
       "associatedDomains": [
         "applinks:globeverify.com",
         "applinks:www.globeverify.com"
-      ]
+      ],
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "GlobeVerify requires microphone access to place and receive telecom voice calls with your leased numbers."
+      }
     },
     "android": {
       "package": "com.globeverify.app",
       "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.INTERNET"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#0A0A0A",
         "foregroundImage": "./assets/android-icon-foreground.png",

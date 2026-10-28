@@ -33,6 +33,8 @@ import {
   ArrowLeft,
   User,
   ShieldCheck,
+  Lock,
+  ChevronRight,
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
@@ -57,6 +59,7 @@ export interface ActiveRental {
   purchasedAt?: string;
   cost: number;
   currency?: string;
+  provider?: string;
   lineType?: 'voip' | 'non_voip';
   isFullAccess?: boolean;
   serviceName?: string;
@@ -151,177 +154,364 @@ const daysLeft = (expiresAt: string) => {
   return { label: `${days}d left`, isCritical: days <= 3 };
 };
 
-// ─── FULL CHAT INTERFACE COMPONENT (MATCHES WEB MESSAGES PAGE) ─────────────
-const RentalChatView: React.FC<{
+// ─── 1. THREADS LIST VIEW (LIST OF PEOPLE WHO MESSAGED) ────────────────────
+const RentalThreadsListView: React.FC<{
   rental: ActiveRental;
   onBack: () => void;
-  openDialpad: (id: string, num: string) => void;
-}> = ({ rental, onBack, openDialpad }) => {
-  const { colors, triggerHaptic, showToast } = useAppSettings();
+  onSelectThread: (remoteNumber: string) => void;
+  onNewChat: () => void;
+}> = ({ rental, onBack, onSelectThread, onNewChat }) => {
+  const { colors } = useAppSettings();
+  const isVoip = rental.provider === 'telnyx' || rental.lineType === 'voip';
 
-  const isNonVoip = rental.lineType === 'non_voip';
   const [threads, setThreads] = useState<ChatThread[]>([]);
-  const [selectedThread, setSelectedThread] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const loadThreads = useCallback(async () => {
+    if (!isVoip) {
+      // For Non-VoIP: Group received OTPs by sender (e.g. WhatsApp, Telegram, etc.)
+      const grouped: Record<string, ChatThread> = {};
+      (rental.otps || []).forEach((o) => {
+        const sender = o.sender || rental.serviceName || 'Verification Service';
+        if (!grouped[sender]) {
+          grouped[sender] = {
+            remoteNumber: sender,
+            contactName: sender,
+            latestMessage: {
+              text: o.message,
+              direction: 'inbound',
+              timestamp: o.receivedAt || new Date().toISOString(),
+            },
+          };
+        }
+      });
+      setThreads(Object.values(grouped));
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await apiClient.get(`/messaging/${rental.id}/threads`);
+      if (res.data?.success && Array.isArray(res.data.threads)) {
+        setThreads(res.data.threads);
+      } else {
+        setThreads([]);
+      }
+    } catch {
+      setThreads([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [rental, isVoip]);
+
+  useEffect(() => {
+    loadThreads();
+  }, [loadThreads]);
+
+  const filteredThreads = useMemo(() => {
+    if (!searchQuery.trim()) return threads;
+    const q = searchQuery.toLowerCase().trim();
+    return threads.filter((t) => {
+      const matchName = (t.contactName || '').toLowerCase().includes(q);
+      const matchNum = t.remoteNumber.toLowerCase().includes(q);
+      const matchText = (t.latestMessage?.text || '').toLowerCase().includes(q);
+      return matchName || matchNum || matchText;
+    });
+  }, [threads, searchQuery]);
+
+  return (
+    <SafeAreaView style={[s.safeArea, { backgroundColor: colors.bg }]} edges={['top', 'bottom']}>
+      <StatusBar style={colors.statusBar} />
+
+      {/* Header */}
+      <View style={[s.threadsHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <TouchableOpacity
+          onPress={onBack}
+          style={s.headerBackBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <ArrowLeft size={20} color={colors.text} />
+        </TouchableOpacity>
+
+        <View style={{ flex: 1, marginLeft: 8 }}>
+          <Text style={[s.threadsHeaderTitle, { color: colors.text }]}>Messages</Text>
+          <Text style={[s.threadsHeaderSubtitle, { color: colors.textMuted }]}>
+            via {rental.phoneNumber} · {isVoip ? 'VoIP' : 'Physical SIM'}
+          </Text>
+        </View>
+
+        {/* New message button for VoIP */}
+        {isVoip && (
+          <TouchableOpacity
+            style={[s.headerNewBtn, { backgroundColor: colors.primarySoft }]}
+            onPress={onNewChat}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Plus size={18} color={colors.primary} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Search Bar */}
+      <View style={[s.threadsSearchWrap, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <View style={[s.searchBarContainer, { backgroundColor: colors.bg, borderColor: colors.border }]}>
+          <Search size={15} color={colors.textMuted} />
+          <TextInput
+            style={[s.searchInput, { color: colors.text }]}
+            placeholder="Search conversations..."
+            placeholderTextColor={colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <X size={14} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Threads List */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingVertical: 10 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {loading ? (
+          <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : filteredThreads.length === 0 ? (
+          <View style={s.emptyChatBox}>
+            <View style={[s.emptyChatIconBox, { backgroundColor: colors.primarySoft }]}>
+              <MessageSquare size={32} color={colors.primary} />
+            </View>
+            <Text style={[s.emptyChatTitle, { color: colors.text }]}>
+              No conversations yet
+            </Text>
+            <Text style={[s.emptyChatSubtitle, { color: colors.textMuted }]}>
+              {isVoip
+                ? 'Tap the + button above to compose a new message or wait for incoming SMS.'
+                : 'Incoming verification SMS and OTP codes will automatically appear here.'}
+            </Text>
+            {isVoip && (
+              <TouchableOpacity
+                style={[s.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
+                onPress={onNewChat}
+              >
+                <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={s.primaryBtnText}>Start New Message</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          filteredThreads.map((thread, idx) => {
+            const displayName = thread.contactName || thread.remoteNumber;
+            const timeStr = thread.latestMessage?.timestamp
+              ? new Date(thread.latestMessage.timestamp).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })
+              : '';
+
+            return (
+              <TouchableOpacity
+                key={thread.remoteNumber || idx}
+                style={[
+                  s.threadItemRow,
+                  { borderBottomColor: colors.border },
+                  idx === 0 && { borderTopWidth: 1, borderTopColor: colors.border },
+                ]}
+                onPress={() => onSelectThread(thread.remoteNumber)}
+                activeOpacity={0.7}
+              >
+                <View style={[s.threadAvatar, { backgroundColor: colors.primary }]}>
+                  {isVoip ? (
+                    <User size={18} color="#FFFFFF" />
+                  ) : (
+                    <Smartphone size={18} color="#FFFFFF" />
+                  )}
+                </View>
+
+                <View style={{ flex: 1, marginLeft: 12, gap: 2 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[s.threadItemName, { color: colors.text }]} numberOfLines={1}>
+                      {displayName}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted }}>{timeStr}</Text>
+                  </View>
+
+                  <Text style={[s.threadItemPreview, { color: colors.textMuted }]} numberOfLines={1}>
+                    {thread.latestMessage?.direction === 'outbound' ? 'You: ' : ''}
+                    {thread.latestMessage?.text || 'New message'}
+                  </Text>
+                </View>
+
+                <ChevronRight size={16} color={colors.textMuted} style={{ marginLeft: 6 }} />
+              </TouchableOpacity>
+            );
+          })
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+// ─── 2. CHAT AREA VIEW (CONVERSATION SCREEN) ──────────────────────────────
+const RentalConversationChatView: React.FC<{
+  rental: ActiveRental;
+  recipient: string | null;
+  isComposingNew: boolean;
+  onBack: () => void;
+  openDialpad: (id: string, num: string) => void;
+  onSelectRecipient: (num: string) => void;
+}> = ({
+  rental,
+  recipient,
+  isComposingNew,
+  onBack,
+  openDialpad,
+  onSelectRecipient,
+}) => {
+  const { colors, triggerHaptic, showToast } = useAppSettings();
+  const isVoip = rental.provider === 'telnyx' || rental.lineType === 'voip';
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newChatNumber, setNewChatNumber] = useState('');
-  const [isNewChat, setIsNewChat] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const scrollViewRef = useRef<any>(null);
 
-  // Load threads for VoIP
-  const loadThreads = useCallback(async () => {
-    if (isNonVoip) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const res = await apiClient.get(`/messaging/${rental.id}/threads`);
-      if (res.data?.success && Array.isArray(res.data.threads)) {
-        setThreads(res.data.threads);
-        if (res.data.threads.length > 0 && !selectedThread && !isNewChat) {
-          setSelectedThread(res.data.threads[0].remoteNumber);
-        }
-      }
-    } catch {
-      // offline / fallback
-    } finally {
-      setLoading(false);
-    }
-  }, [rental.id, isNonVoip, selectedThread, isNewChat]);
+  const activeTargetNumber = recipient || (newChatNumber.trim() ? newChatNumber.trim() : null);
 
-  // Load messages for a specific thread
-  const loadMessages = useCallback(
-    async (remoteNumber: string) => {
-      try {
-        const res = await apiClient.get(
-          `/messaging/${rental.id}/thread/${encodeURIComponent(remoteNumber)}`
-        );
-        if (res.data?.success && Array.isArray(res.data.messages)) {
-          const list: ChatMessage[] = res.data.messages.map((m: any) => ({
-            id: m._id || `${m.timestamp}-${Math.random()}`,
-            remotePhoneNumber: m.remotePhoneNumber,
-            direction: m.direction,
-            text: m.text,
-            timestamp: m.timestamp,
-          }));
-          setMessages(list);
-          setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 150);
-        }
-      } catch {
-        // no-op
-      }
-    },
-    [rental.id]
-  );
+  const loadMessages = useCallback(async () => {
+    if (!isVoip) {
+      // Non-VoIP: filter OTPs for this sender
+      const filteredOtps = (rental.otps || []).filter((o) => {
+        const sender = o.sender || rental.serviceName || 'Verification Service';
+        return !recipient || sender === recipient;
+      });
 
-  useEffect(() => {
-    if (isNonVoip) {
-      // Non-VoIP: Load all incoming OTPs as chat messages
-      const otpMsgs: ChatMessage[] = (rental.otps || []).map((o, idx) => ({
+      const list: ChatMessage[] = filteredOtps.map((o, idx) => ({
         id: `otp-${idx}-${o.receivedAt}`,
-        remotePhoneNumber: o.sender || rental.serviceName || 'Verification Service',
+        remotePhoneNumber: o.sender || 'Service',
         direction: 'inbound',
         text: o.message,
         code: o.code,
         timestamp: o.receivedAt || new Date().toISOString(),
       }));
-      setMessages(otpMsgs);
+      setMessages(list);
       setLoading(false);
-    } else {
-      loadThreads();
+      return;
     }
-  }, [isNonVoip, rental.otps, rental.serviceName, loadThreads]);
 
-  useEffect(() => {
-    if (!isNonVoip && selectedThread && !isNewChat) {
-      loadMessages(selectedThread);
+    if (!recipient) {
+      setMessages([]);
+      setLoading(false);
+      return;
     }
-  }, [isNonVoip, selectedThread, isNewChat, loadMessages]);
 
-  // Live polling for incoming SMS every 5 seconds
-  useEffect(() => {
-    if (isNonVoip) return;
-    const interval = setInterval(() => {
-      if (selectedThread && !isNewChat) {
-        loadMessages(selectedThread);
+    try {
+      const res = await apiClient.get(
+        `/messaging/${rental.id}/thread/${encodeURIComponent(recipient)}`
+      );
+      if (res.data?.success && Array.isArray(res.data.messages)) {
+        const list: ChatMessage[] = res.data.messages.map((m: any) => ({
+          id: m._id || `${m.timestamp}-${Math.random()}`,
+          remotePhoneNumber: m.remotePhoneNumber,
+          direction: m.direction,
+          text: m.text,
+          timestamp: m.timestamp,
+        }));
+        setMessages(list);
+        setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
       }
-      loadThreads();
+    } catch {
+      // no-op
+    } finally {
+      setLoading(false);
+    }
+  }, [rental, recipient, isVoip]);
+
+  useEffect(() => {
+    loadMessages();
+  }, [loadMessages]);
+
+  // Live polling for incoming messages every 5 seconds
+  useEffect(() => {
+    if (!isVoip || !recipient) return;
+    const interval = setInterval(() => {
+      loadMessages();
     }, 5000);
     return () => clearInterval(interval);
-  }, [isNonVoip, selectedThread, isNewChat, loadMessages, loadThreads]);
+  }, [isVoip, recipient, loadMessages]);
 
-  const handleCopy = async (text: string, msg: string = 'Copied to clipboard!') => {
+  const handleCopy = async (text: string) => {
     await Clipboard.setStringAsync(text);
     triggerHaptic('success');
-    showToast(msg, 'success');
+    showToast('Code copied!', 'success');
   };
 
   const handleSendMessage = async () => {
+    if (!isVoip) return;
     const text = messageText.trim();
-    const targetNumber = isNewChat ? newChatNumber.trim() : selectedThread?.trim();
+    const target = activeTargetNumber;
 
-    if (!targetNumber) {
-      showToast('Please enter a recipient phone number', 'error');
+    if (!target) {
+      showToast('Enter recipient phone number', 'error');
       return;
     }
     if (!text) {
-      showToast('Please enter a message to send', 'error');
+      showToast('Enter message text', 'error');
       return;
     }
 
     setSending(true);
     triggerHaptic('medium');
 
-    // Optimistic UI append
-    const optimisticMsg: ChatMessage = {
+    const optimistic: ChatMessage = {
       id: `temp-${Date.now()}`,
-      remotePhoneNumber: targetNumber,
+      remotePhoneNumber: target,
       direction: 'outbound',
       text,
       timestamp: new Date().toISOString(),
     };
 
-    setMessages((prev) => [...prev, optimisticMsg]);
+    setMessages((prev) => [...prev, optimistic]);
     setMessageText('');
     setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
       const res = await apiClient.post(`/messaging/${rental.id}/send`, {
-        to: targetNumber,
+        to: target,
         text,
       });
 
       if (res.data?.success) {
-        if (isNewChat) {
-          setIsNewChat(false);
-          setSelectedThread(targetNumber);
+        if (isComposingNew) {
+          onSelectRecipient(target);
         }
-        await loadThreads();
       } else {
         showToast(res.data?.message || 'Failed to send SMS', 'error');
       }
     } catch (err: any) {
-      // Fallback endpoint
+      // Fallback
       try {
-        const fbRes = await apiClient.post(
-          `/numbers/rentals/${rental.id}/send-sms`,
-          { to: targetNumber, text }
-        );
+        const fbRes = await apiClient.post(`/numbers/rentals/${rental.id}/send-sms`, {
+          to: target,
+          text,
+        });
         if (fbRes.data?.success) {
-          if (isNewChat) {
-            setIsNewChat(false);
-            setSelectedThread(targetNumber);
-          }
-          await loadThreads();
+          if (isComposingNew) onSelectRecipient(target);
           return;
         }
       } catch {}
 
       showToast(
-        err?.response?.data?.message || 'Could not send SMS. Check your balance.',
+        err?.response?.data?.message || 'Could not send SMS. Check your credit balance.',
         'error'
       );
     } finally {
@@ -329,21 +519,16 @@ const RentalChatView: React.FC<{
     }
   };
 
-  const currentDisplayContact = isNewChat
+  const headerTitle = isComposingNew
     ? newChatNumber || 'New Message'
-    : selectedThread || (isNonVoip ? (rental.serviceName || 'SMS Messages') : 'Messages');
+    : recipient || 'Conversation';
 
   return (
     <SafeAreaView style={[s.safeArea, { backgroundColor: colors.bg }]} edges={['top', 'bottom']}>
       <StatusBar style={colors.statusBar} />
 
-      {/* ── CHAT TOP HEADER ──────────────────────────────────────────────── */}
-      <View
-        style={[
-          s.chatHeaderBar,
-          { backgroundColor: colors.surface, borderBottomColor: colors.border },
-        ]}
-      >
+      {/* ── CHAT HEADER ─────────────────────────────────────────────────── */}
+      <View style={[s.chatHeaderBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <TouchableOpacity
           onPress={onBack}
           style={s.chatBackBtn}
@@ -358,122 +543,36 @@ const RentalChatView: React.FC<{
 
         <View style={{ flex: 1, marginLeft: 10 }}>
           <Text style={[s.chatContactTitle, { color: colors.text }]} numberOfLines={1}>
-            {currentDisplayContact}
+            {headerTitle}
           </Text>
           <Text style={[s.chatSubTitle, { color: colors.textMuted }]} numberOfLines={1}>
-            via {rental.phoneNumber} · {isNonVoip ? 'Physical SIM' : 'VoIP'}
+            via {rental.phoneNumber} · {isVoip ? 'VoIP Line' : 'Physical SIM'}
           </Text>
         </View>
 
-        {/* Header Action Buttons */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-          {!isNonVoip && (
-            <>
-              <TouchableOpacity
-                style={[s.chatHeaderIconBtn, { backgroundColor: colors.primarySoft }]}
-                onPress={() => {
-                  const target = selectedThread || newChatNumber || rental.phoneNumber;
-                  openDialpad(rental.id, target);
-                }}
-              >
-                <Phone size={16} color={colors.primary} />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[s.chatHeaderIconBtn, { backgroundColor: colors.primarySoft }]}
-                onPress={() => {
-                  setIsNewChat(true);
-                  setNewChatNumber('');
-                  setMessages([]);
-                }}
-              >
-                <Plus size={18} color={colors.primary} />
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
+        {/* CALL BUTTON: ONLY SHOWN FOR VOIP NUMBERS! ─────────────────────── */}
+        {isVoip && activeTargetNumber && (
+          <TouchableOpacity
+            style={[s.chatHeaderCallBtn, { backgroundColor: colors.primary }]}
+            onPress={() => {
+              triggerHaptic('medium');
+              openDialpad(rental.id, activeTargetNumber);
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Phone size={15} color="#FFFFFF" />
+            <Text style={s.chatHeaderCallBtnText}>Call</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* ── CONVERSATION THREAD PILLS (FOR VOIP) ─────────────────────────── */}
-      {!isNonVoip && threads.length > 0 && (
-        <View
-          style={[
-            s.threadsBar,
-            { backgroundColor: colors.surface, borderBottomColor: colors.border },
-          ]}
-        >
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8 }}
-          >
-            <TouchableOpacity
-              onPress={() => {
-                setIsNewChat(true);
-                setNewChatNumber('');
-                setMessages([]);
-              }}
-              style={[
-                s.threadPill,
-                isNewChat
-                  ? { backgroundColor: colors.primary, borderColor: colors.primary }
-                  : { backgroundColor: colors.bg, borderColor: colors.border },
-              ]}
-            >
-              <Plus size={12} color={isNewChat ? '#FFFFFF' : colors.textMuted} />
-              <Text
-                style={[
-                  s.threadPillText,
-                  { color: isNewChat ? '#FFFFFF' : colors.textSecondary },
-                ]}
-              >
-                New Chat
-              </Text>
-            </TouchableOpacity>
-
-            {threads.map((th) => {
-              const isActive = !isNewChat && selectedThread === th.remoteNumber;
-              return (
-                <TouchableOpacity
-                  key={th.remoteNumber}
-                  onPress={() => {
-                    setIsNewChat(false);
-                    setSelectedThread(th.remoteNumber);
-                  }}
-                  style={[
-                    s.threadPill,
-                    isActive
-                      ? { backgroundColor: colors.primary, borderColor: colors.primary }
-                      : { backgroundColor: colors.bg, borderColor: colors.border },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      s.threadPillText,
-                      { color: isActive ? '#FFFFFF' : colors.textSecondary },
-                    ]}
-                  >
-                    {th.contactName || th.remoteNumber}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* ── "TO:" RECIPIENT INPUT FOR NEW CHAT ────────────────────────────── */}
-      {isNewChat && !isNonVoip && (
-        <View
-          style={[
-            s.toBar,
-            { backgroundColor: colors.surface, borderBottomColor: colors.border },
-          ]}
-        >
+      {/* If Composing New Chat: "To:" Bar */}
+      {isComposingNew && isVoip && (
+        <View style={[s.toBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <Text style={[s.toLabel, { color: colors.textMuted }]}>To:</Text>
           <TextInput
             style={[s.toInput, { color: colors.text }]}
-            placeholder="Enter recipient phone (e.g. +1 555 123 4567)"
+            placeholder="Recipient phone (e.g. +1 555 123 4567)"
             placeholderTextColor={colors.textMuted}
             keyboardType="phone-pad"
             value={newChatNumber}
@@ -499,9 +598,7 @@ const RentalChatView: React.FC<{
           style={s.chatScroll}
           contentContainerStyle={s.chatScrollContent}
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={() =>
-            scrollViewRef.current?.scrollToEnd({ animated: true })
-          }
+          onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
         >
           {loading ? (
             <View style={{ paddingVertical: 40, alignItems: 'center' }}>
@@ -513,42 +610,41 @@ const RentalChatView: React.FC<{
                 <MessageSquare size={32} color={colors.primary} />
               </View>
               <Text style={[s.emptyChatTitle, { color: colors.text }]}>
-                {isNonVoip ? 'Waiting for SMS Verification' : 'Start a Conversation'}
+                {isVoip ? 'No messages here yet' : 'Waiting for SMS Verification'}
               </Text>
               <Text style={[s.emptyChatSubtitle, { color: colors.textMuted }]}>
-                {isNonVoip
-                  ? 'Incoming SMS OTPs for this dedicated physical SIM will arrive here in real time.'
-                  : 'Send and receive SMS messages directly with this leased VoIP line.'}
+                {isVoip
+                  ? 'Send a message below to start this conversation.'
+                  : 'Incoming OTPs from apps will appear on the left automatically.'}
               </Text>
             </View>
           ) : (
             messages.map((msg, idx) => {
-              const isOutbound = msg.direction === 'outbound';
+              // My messages on the RIGHT, sender messages on the LEFT
+              const isMyChat = msg.direction === 'outbound';
+
               return (
                 <View
                   key={msg.id || idx}
                   style={[
                     s.chatBubbleRow,
-                    isOutbound ? s.chatBubbleRowOutbound : s.chatBubbleRowInbound,
+                    isMyChat ? s.chatBubbleRowOutbound : s.chatBubbleRowInbound,
                   ]}
                 >
                   <View
                     style={[
                       s.chatBubble,
-                      isOutbound
+                      isMyChat
                         ? [s.chatBubbleOutbound, { backgroundColor: colors.primary }]
-                        : [
-                            s.chatBubbleInbound,
-                            { backgroundColor: colors.surface, borderColor: colors.border },
-                          ],
+                        : [s.chatBubbleInbound, { backgroundColor: colors.surface, borderColor: colors.border }],
                     ]}
                   >
-                    {/* Render Highlighted OTP code if available */}
+                    {/* OTP Code Card if available */}
                     {msg.code ? (
                       <View style={s.chatOtpWrap}>
                         <Text style={s.chatOtpCode}>{msg.code}</Text>
                         <TouchableOpacity
-                          onPress={() => handleCopy(msg.code!, 'Code copied!')}
+                          onPress={() => handleCopy(msg.code!)}
                           style={s.chatOtpCopyBtn}
                         >
                           <Copy size={11} color="#FFFFFF" />
@@ -560,7 +656,7 @@ const RentalChatView: React.FC<{
                     <Text
                       style={[
                         s.chatBubbleText,
-                        { color: isOutbound ? '#FFFFFF' : colors.text },
+                        { color: isMyChat ? '#FFFFFF' : colors.text },
                       ]}
                       selectable
                     >
@@ -571,11 +667,7 @@ const RentalChatView: React.FC<{
                       <Text
                         style={[
                           s.chatBubbleTime,
-                          {
-                            color: isOutbound
-                              ? 'rgba(255, 255, 255, 0.7)'
-                              : colors.textMuted,
-                          },
+                          { color: isMyChat ? 'rgba(255, 255, 255, 0.7)' : colors.textMuted },
                         ]}
                       >
                         {msg.timestamp
@@ -585,12 +677,8 @@ const RentalChatView: React.FC<{
                             })
                           : ''}
                       </Text>
-                      {isOutbound && (
-                        <Check
-                          size={12}
-                          color="rgba(255, 255, 255, 0.8)"
-                          style={{ marginLeft: 3 }}
-                        />
+                      {isMyChat && (
+                        <Check size={12} color="rgba(255, 255, 255, 0.8)" style={{ marginLeft: 3 }} />
                       )}
                     </View>
                   </View>
@@ -600,20 +688,10 @@ const RentalChatView: React.FC<{
           )}
         </ScrollView>
 
-        {/* ── BOTTOM DOCKED INPUT BAR ────────────────────────────────────── */}
-        {!isNonVoip ? (
-          <View
-            style={[
-              s.bottomInputBar,
-              { backgroundColor: colors.surface, borderTopColor: colors.border },
-            ]}
-          >
-            <View
-              style={[
-                s.inputContainer,
-                { backgroundColor: colors.bg, borderColor: colors.border },
-              ]}
-            >
+        {/* ── BOTTOM MESSAGE INPUT / DISABLED FOR NON-VOIP ───────────────── */}
+        {isVoip ? (
+          <View style={[s.bottomInputBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+            <View style={[s.inputContainer, { backgroundColor: colors.bg, borderColor: colors.border }]}>
               <TextInput
                 style={[s.chatTextInput, { color: colors.text }]}
                 placeholder="Text message..."
@@ -628,9 +706,7 @@ const RentalChatView: React.FC<{
                 style={[
                   s.chatSendBtn,
                   {
-                    backgroundColor: messageText.trim()
-                      ? colors.primary
-                      : colors.border,
+                    backgroundColor: messageText.trim() ? colors.primary : colors.border,
                   },
                 ]}
                 onPress={handleSendMessage}
@@ -645,16 +721,14 @@ const RentalChatView: React.FC<{
             </View>
           </View>
         ) : (
-          <View
-            style={[
-              s.bottomNoticeBar,
-              { backgroundColor: colors.surface, borderTopColor: colors.border },
-            ]}
-          >
-            <ShieldCheck size={14} color={colors.primary} />
-            <Text style={[s.bottomNoticeText, { color: colors.textMuted }]}>
-              Physical SIMs are dedicated for receiving SMS verification codes.
-            </Text>
+          /* DISABLED INPUT FOR NON-VOIP NUMBERS ───────────────────────────── */
+          <View style={[s.bottomDisabledBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+            <View style={[s.disabledInputBox, { backgroundColor: colors.bg, borderColor: colors.border }]}>
+              <Lock size={14} color={colors.textMuted} />
+              <Text style={[s.disabledInputText, { color: colors.textMuted }]}>
+                Non-VoIP SIMs cannot send outbound SMS (Receive-only)
+              </Text>
+            </View>
           </View>
         )}
       </KeyboardAvoidingView>
@@ -662,7 +736,7 @@ const RentalChatView: React.FC<{
   );
 };
 
-// ─── MAIN RENTALS SCREEN ───────────────────────────────────────────────────
+// ─── 3. MAIN RENTALS SCREEN COMPONENT ──────────────────────────────────────
 export const RentalsScreen: React.FC<RentalsScreenProps> = ({
   onBack,
   onNavigateToHome,
@@ -689,8 +763,10 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
   const [purchasingKey, setPurchasingKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Active full-screen chat rental
-  const [chatRental, setChatRental] = useState<ActiveRental | null>(null);
+  // ── Two-Step Messaging State ─────────────────────────────────────────────
+  const [activeRentalForMessages, setActiveRentalForMessages] = useState<ActiveRental | null>(null);
+  const [activeChatRecipient, setActiveChatRecipient] = useState<string | null>(null);
+  const [isComposingNew, setIsComposingNew] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -991,17 +1067,47 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
     else if (nav === 'wallet') onNavigateToWallet?.();
   };
 
-  // If a chat rental is selected, render the full-screen iMessage chat view!
-  if (chatRental) {
+  // Find any active VoIP rental to provide immediate dialpad access
+  const primaryVoipRental = useMemo(() => {
+    return activeRentals.find(
+      (r) => r.provider === 'telnyx' || r.lineType === 'voip'
+    );
+  }, [activeRentals]);
+
+  // ─── TWO-STEP MESSAGING NAVIGATION ────────────────────────────────────────
+  // Step 2: Conversation View
+  if (activeRentalForMessages && (activeChatRecipient || isComposingNew)) {
     return (
-      <RentalChatView
-        rental={chatRental}
-        onBack={() => setChatRental(null)}
+      <RentalConversationChatView
+        rental={activeRentalForMessages}
+        recipient={activeChatRecipient}
+        isComposingNew={isComposingNew}
+        onBack={() => {
+          setActiveChatRecipient(null);
+          setIsComposingNew(false);
+        }}
         openDialpad={openDialpad}
+        onSelectRecipient={(num) => {
+          setIsComposingNew(false);
+          setActiveChatRecipient(num);
+        }}
       />
     );
   }
 
+  // Step 1: Threads List (List of people who messaged)
+  if (activeRentalForMessages) {
+    return (
+      <RentalThreadsListView
+        rental={activeRentalForMessages}
+        onBack={() => setActiveRentalForMessages(null)}
+        onSelectThread={(remoteNumber) => setActiveChatRecipient(remoteNumber)}
+        onNewChat={() => setIsComposingNew(true)}
+      />
+    );
+  }
+
+  // ─── MAIN RENTALS SCREEN ──────────────────────────────────────────────────
   return (
     <SafeAreaView style={[s.safeArea, { backgroundColor: colors.bg }]} edges={['top']}>
       <StatusBar style={colors.statusBar} />
@@ -1025,12 +1131,28 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
           />
         }
       >
-        {/* ── PAGE HEADER & TABS ────────────────────────────────────────── */}
+        {/* ── PAGE HEADER & TABS + DIALPAD SHORTCUT ───────────────────────── */}
         <View style={[s.headerBar, { borderBottomColor: colors.border }]}>
           <View style={{ flex: 1 }}>
-            <Text style={[s.pageTitle, { color: colors.text }]}>
-              Rental Numbers
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={[s.pageTitle, { color: colors.text }]}>
+                Rental Numbers
+              </Text>
+              {/* Dialpad button directly accessible whenever user has a VoIP line */}
+              {primaryVoipRental && (
+                <TouchableOpacity
+                  style={[s.headerDialpadBtn, { backgroundColor: colors.primary }]}
+                  onPress={() => {
+                    triggerHaptic('medium');
+                    openDialpad(primaryVoipRental.id, primaryVoipRental.phoneNumber);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Phone size={13} color="#FFFFFF" />
+                  <Text style={s.headerDialpadBtnText}>Dialpad</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             <Text style={[s.pageSubtitle, { color: colors.textMuted }]}>
               Dedicated 30-day lines for SMS & voice calls
             </Text>
@@ -1109,8 +1231,8 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                 {activeRentals.map((rental, idx) => {
                   const exp = daysLeft(rental.expiresAt);
                   const isCopied = copiedKey === rental.id;
-                  const isNonVoip = rental.lineType === 'non_voip';
-                  const serviceDisplayName = isNonVoip
+                  const isVoip = rental.provider === 'telnyx' || rental.lineType === 'voip';
+                  const serviceDisplayName = !isVoip
                     ? rental.serviceName || (rental.isFullAccess ? 'Full Rent (Any Service)' : 'Physical SIM')
                     : rental.countryName || rental.countryCode || 'VoIP Line';
 
@@ -1144,7 +1266,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                                   { color: colors.primary },
                                 ]}
                               >
-                                {isNonVoip ? 'Physical SIM' : 'VoIP Leased'}
+                                {isVoip ? 'VoIP Leased' : 'Physical SIM'}
                               </Text>
                             </View>
                           </View>
@@ -1166,8 +1288,8 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
 
                       {/* Action Buttons Row */}
                       <View style={s.activeCardActions}>
-                        {/* Call button for VoIP */}
-                        {!isNonVoip && (
+                        {/* Call button: ONLY FOR VOIP NUMBERS! */}
+                        {isVoip && (
                           <TouchableOpacity
                             style={s.blueActionBtn}
                             onPress={() => {
@@ -1181,18 +1303,18 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                           </TouchableOpacity>
                         )}
 
-                        {/* Messages Chat View Button */}
+                        {/* Messages Button: Opens list of people who messaged */}
                         <TouchableOpacity
                           style={[s.outlineActionBtn, { borderColor: colors.border }]}
                           onPress={() => {
                             triggerHaptic('selection');
-                            setChatRental(rental);
+                            setActiveRentalForMessages(rental);
                           }}
                           activeOpacity={0.8}
                         >
                           <MessageSquare size={13} color={colors.primary} />
                           <Text style={[s.outlineActionBtnText, { color: colors.primary }]}>
-                            {!isNonVoip ? 'Messages' : 'View SMS'}
+                            {isVoip ? 'Messages' : 'View SMS'}
                           </Text>
                         </TouchableOpacity>
 
@@ -1274,7 +1396,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                       style={[s.lineTypeSubtitle, { color: colors.textMuted }]}
                       numberOfLines={1}
                     >
-                      Carrier SIMs · Any App OTP
+                      Carrier SIMs · Receive OTPs
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -1702,6 +1824,19 @@ const s = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
   },
+  headerDialpadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  headerDialpadBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
   tabsRow: {
     flexDirection: 'row',
     gap: 6,
@@ -1986,8 +2121,74 @@ const s = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
   },
+  primaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  primaryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
 
-  // ── Chat Screen Styles (iMessage Web Parity) ─────────────────────────────
+  // ─── THREADS LIST STYLES ──────────────────────────────────────────────────
+  threadsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  headerBackBtn: {
+    padding: 6,
+  },
+  threadsHeaderTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  threadsHeaderSubtitle: {
+    fontSize: 12,
+    marginTop: 1,
+  },
+  headerNewBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  threadsSearchWrap: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  threadItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+  },
+  threadAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  threadItemName: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  threadItemPreview: {
+    fontSize: 12.5,
+    marginTop: 2,
+  },
+
+  // ─── CHAT AREA STYLES ─────────────────────────────────────────────────────
   chatHeaderBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2015,30 +2216,18 @@ const s = StyleSheet.create({
     fontSize: 11.5,
     marginTop: 1,
   },
-  chatHeaderIconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  threadsBar: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderBottomWidth: 1,
-  },
-  threadPill: {
+  chatHeaderCallBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
+    gap: 4,
+    paddingHorizontal: 11,
     paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 8,
   },
-  threadPillText: {
+  chatHeaderCallBtnText: {
+    color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   toBar: {
     flexDirection: 'row',
@@ -2184,18 +2373,24 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bottomNoticeBar: {
+  bottomDisabledBar: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+  },
+  disabledInputBox: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
   },
-  bottomNoticeText: {
+  disabledInputText: {
     fontSize: 12,
-    fontWeight: '500',
-    textAlign: 'center',
+    fontWeight: '600',
   },
 });
