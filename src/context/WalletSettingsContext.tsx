@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import type { ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
+import { Appearance } from 'react-native';
 import {
   CustomDialogModal,
   type DialogConfig,
@@ -189,7 +190,7 @@ export interface AppDisplaySettings {
 // ─── Sensible Clean Defaults ─────────────────────────────────────────────────
 
 export const DEFAULT_APP_SETTINGS: AppDisplaySettings = {
-  themeMode: 'light',
+  themeMode: Appearance.getColorScheme() === 'dark' ? 'dark' : 'light', // follow phone theme by default
   navigationStyle: 'floating-pill',
   showHamburgerMenu: false, // Hamburger hidden by default; user can enable in Settings
   defaultStartScreen: 'dashboard',
