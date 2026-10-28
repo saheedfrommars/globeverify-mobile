@@ -111,10 +111,14 @@ export const CallModal: React.FC = () => {
 
   const handleStartCall = () => {
     if (!dialedNumber.trim() || !dialpadRentalId) return;
+    let num = dialedNumber.trim();
+    if (!num.startsWith('+')) {
+      num = '+' + num;
+    }
     startOutboundCall(
       dialpadRentalId,
       dialpadFromNumber || 'Leased Number',
-      dialedNumber.trim()
+      num
     );
     setDialedNumber('');
   };

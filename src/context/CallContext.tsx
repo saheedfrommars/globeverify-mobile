@@ -7,6 +7,7 @@ import React, {
   useCallback,
   ReactNode,
 } from 'react';
+import { Alert } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import apiClient from '../api/client';
 import { socketService } from '../services/socketService';
@@ -274,7 +275,9 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return false;
       }
     } catch (err: any) {
-      console.warn('[CallContext] Outbound call error:', err);
+      const errMsg = err?.response?.data?.message || err?.message || 'Outbound call failed';
+      Alert.alert('Call Failed', errMsg);
+      console.warn('[CallContext] Outbound call error:', errMsg);
       setCallState('idle');
       setCurrentCall(null);
       return false;
