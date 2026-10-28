@@ -24,6 +24,7 @@ import {
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
+import { useCall } from '../../context/CallContext';
 import apiClient from '../../api/client';
 import { formatCurrency } from '../../utils/currency';
 import { SkeletonNumberCard, SkeletonListItem } from '../../components/ui/Skeleton';
@@ -94,6 +95,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
 }) => {
   const { user, refreshUser } = useAuth();
   const { colors, triggerHaptic, showDialog, showToast } = useAppSettings();
+  const { openDialpad } = useCall();
 
   const [tab, setTab] = useState<'active' | 'catalog'>('active');
   const [activeRentals, setActiveRentals] = useState<ActiveRental[]>([]);
@@ -392,11 +394,30 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                         {exp.label}
                       </Text>
 
-                      {isCopied ? (
-                        <Check size={17} color="#10B981" />
-                      ) : (
-                        <Copy size={17} color={colors.textMuted} />
-                      )}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <TouchableOpacity
+                          style={s.callActionButton}
+                          onPress={() => {
+                            triggerHaptic('medium');
+                            openDialpad(rental.id, rental.phoneNumber);
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Phone size={13} color="#FFFFFF" />
+                          <Text style={s.callBtnText}>Call</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => handleCopy(rental.phoneNumber, rental.id)}
+                          style={{ padding: 4 }}
+                        >
+                          {isCopied ? (
+                            <Check size={17} color="#10B981" />
+                          ) : (
+                            <Copy size={17} color={colors.textMuted} />
+                          )}
+                        </TouchableOpacity>
+                      </View>
                     </TouchableOpacity>
                   );
                 })}
@@ -620,5 +641,19 @@ const s = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '800',
+  },
+  callActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#10B981',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  callBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11.5,
+    fontWeight: '700',
   },
 });

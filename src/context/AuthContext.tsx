@@ -171,7 +171,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     const uid = user?._id || user?.id;
     if (token && uid) {
-      socketService.connect(uid);
+      socketService.connect(uid, token);
       registerForPushNotificationsAsync().catch(() => {});
     } else {
       socketService.disconnect();

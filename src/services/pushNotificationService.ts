@@ -14,13 +14,19 @@ const PUSH_ENABLED_STORAGE_KEY = 'gv_push_notifications_enabled';
 try {
   if (Notifications && typeof Notifications.setNotificationHandler === 'function') {
     Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      }),
+      handleNotification: async (notification) => {
+        const isCall = notification?.request?.content?.data?.type === 'incoming_call';
+        return {
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+          priority: isCall
+            ? Notifications.AndroidNotificationPriority.MAX
+            : Notifications.AndroidNotificationPriority.DEFAULT,
+        };
+      },
     });
   }
 } catch (err) {
@@ -33,12 +39,33 @@ export interface PushRegistrationResult {
   error?: string;
 }
 
+type IncomingCallListener = (callData: any) => void;
+const incomingCallListeners = new Set<IncomingCallListener>();
+
+export const onIncomingCallReceived = (listener: IncomingCallListener) => {
+  incomingCallListeners.add(listener);
+  return () => {
+    incomingCallListeners.delete(listener);
+  };
+};
+
+export const triggerIncomingCallEvent = (callData: any) => {
+  incomingCallListeners.forEach((fn) => {
+    try {
+      fn(callData);
+    } catch (e) {
+      console.warn('[PushService] Incoming call listener error:', e);
+    }
+  });
+};
+
 /**
  * Configure Android notification channels with high importance and vibration.
  */
 async function setupAndroidNotificationChannel() {
   if (Platform.OS === 'android' && Notifications && typeof Notifications.setNotificationChannelAsync === 'function') {
     try {
+      // 1. General notifications (OTPs, balance updates)
       await Notifications.setNotificationChannelAsync('default', {
         name: 'GlobeVerify Updates',
         description: 'Real-time SMS OTPs, rental notifications, and deposit updates',
@@ -48,6 +75,24 @@ async function setupAndroidNotificationChannel() {
         sound: 'default',
         enableVibrate: true,
         showBadge: true,
+      });
+
+      // 2. High-priority incoming phone calls channel (Ringing sound + vibrating pattern)
+      await Notifications.setNotificationChannelAsync('incoming-calls', {
+        name: 'Incoming Phone Calls',
+        description: 'Ringing incoming voice calls on your leased numbers',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
+        lightColor: '#2563EB',
+        sound: 'default',
+        enableVibrate: true,
+        showBadge: true,
+        bypassDnd: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        audioAttributes: {
+          usage: Notifications.AndroidAudioUsage.NOTIFICATION_RINGTONE,
+          contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+        },
       });
     } catch (err) {
       console.log('[PushService] setupAndroidNotificationChannel notice:', err);
@@ -172,6 +217,16 @@ export function setupNotificationResponseListener(
         .catch(() => {});
     }
 
+    // Listen for incoming notifications while the app is in the foreground
+    const foregroundSubscription = typeof Notifications.addNotificationReceivedListener === 'function'
+      ? Notifications.addNotificationReceivedListener((notification) => {
+          const data = notification?.request?.content?.data;
+          if (data?.type === 'incoming_call') {
+            triggerIncomingCallEvent(data);
+          }
+        })
+      : null;
+
     // Listen for taps while the app is running in foreground or background
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
       handleNotificationPayload(response.notification, onNavigateScreen);
@@ -180,6 +235,7 @@ export function setupNotificationResponseListener(
     return () => {
       try {
         subscription.remove();
+        foregroundSubscription?.remove();
       } catch {}
     };
   } catch (err) {
@@ -194,6 +250,13 @@ function handleNotificationPayload(
 ) {
   try {
     const data = notification.request.content.data || {};
+
+    // Check if this notification is an incoming call
+    if (data.type === 'incoming_call') {
+      triggerIncomingCallEvent(data);
+      return;
+    }
+
     const targetUrl = data.url || data.path || data.link;
 
     if (targetUrl && typeof targetUrl === 'string') {

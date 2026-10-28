@@ -11,6 +11,8 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { WalletSettingsProvider } from './src/context/WalletSettingsContext';
+import { CallProvider } from './src/context/CallContext';
+import { CallModal } from './src/components/calling/CallModal';
 import { OnboardingScreen } from './src/screens/onboarding/OnboardingScreen';
 import { LoginScreen } from './src/screens/auth/LoginScreen';
 import { RegisterScreen } from './src/screens/auth/RegisterScreen';
@@ -387,8 +389,11 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <StatusBar style="auto" />
-        <MainNavigator />
+        <CallProvider>
+          <StatusBar style="auto" />
+          <MainNavigator />
+          <CallModal />
+        </CallProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );

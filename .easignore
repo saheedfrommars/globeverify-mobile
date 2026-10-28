@@ -1,0 +1,6 @@
+*.apk
+*.aab
+node_modules/
+.expo/
+dist/
+web-build/

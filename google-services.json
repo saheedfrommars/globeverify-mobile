@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "220747964723",
+    "project_id": "turnkey-tribute-474619-c1",
+    "storage_bucket": "turnkey-tribute-474619-c1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220747964723:android:6df749044be0326eee9e46",
+        "android_client_info": {
+          "package_name": "com.globeverify.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "220747964723-jcgmerkn7dhhumqkbiq7rkdg7ojqd32b.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBaIcdJDriyKN3KvKV3KgLcm9Cj1LeuKWI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "220747964723-bstq8ahk8gu7v0fna5bulh9vk24polss.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

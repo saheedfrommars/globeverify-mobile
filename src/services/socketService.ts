@@ -3,9 +3,21 @@ import apiClient from '../api/client';
 
 type SocketEventCallback = (data: any) => void;
 
+export type SupportedSocketEvent =
+  | 'otp_received'
+  | 'rental_extended'
+  | 'new_notification'
+  | 'incoming_call'
+  | 'call_answered'
+  | 'call_ended'
+  | 'call_transcription_update'
+  | 'chat_message_received'
+  | 'balance_updated';
+
 class RealtimeSocketService {
   private socket: Socket | null = null;
   private currentUserId: string | null = null;
+  private currentToken: string | null = null;
   private listeners: Map<string, Set<SocketEventCallback>> = new Map();
 
   public getBackendUrl(): string {
@@ -13,7 +25,7 @@ class RealtimeSocketService {
     return base.replace(/\/api\/?$/, '');
   }
 
-  public connect(userId?: string) {
+  public connect(userId?: string, token?: string | null) {
     if (!userId) return;
 
     if (this.socket && this.socket.connected && this.currentUserId === userId) {
@@ -21,6 +33,7 @@ class RealtimeSocketService {
     }
 
     this.currentUserId = userId;
+    this.currentToken = token || null;
 
     if (this.socket) {
       this.socket.disconnect();
@@ -33,6 +46,12 @@ class RealtimeSocketService {
       reconnection: true,
       reconnectionAttempts: 8,
       reconnectionDelay: 2000,
+      auth: {
+        token: this.currentToken,
+      },
+      extraHeaders: this.currentToken
+        ? { Authorization: `Bearer ${this.currentToken}` }
+        : undefined,
     });
 
     this.socket.on('connect', () => {
@@ -41,7 +60,18 @@ class RealtimeSocketService {
       }
     });
 
-    const events = ['otp_received', 'rental_extended', 'new_notification'];
+    const events: SupportedSocketEvent[] = [
+      'otp_received',
+      'rental_extended',
+      'new_notification',
+      'incoming_call',
+      'call_answered',
+      'call_ended',
+      'call_transcription_update',
+      'chat_message_received',
+      'balance_updated',
+    ];
+
     events.forEach((evt) => {
       this.socket?.on(evt, (payload: any) => {
         const set = this.listeners.get(evt);
@@ -58,6 +88,7 @@ class RealtimeSocketService {
 
   public disconnect() {
     this.currentUserId = null;
+    this.currentToken = null;
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
@@ -65,7 +96,7 @@ class RealtimeSocketService {
   }
 
   public subscribe(
-    event: 'otp_received' | 'rental_extended' | 'new_notification',
+    event: SupportedSocketEvent,
     callback: SocketEventCallback
   ): () => void {
     if (!this.listeners.has(event)) {
