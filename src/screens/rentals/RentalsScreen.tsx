@@ -10,6 +10,10 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Modal,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,8 +30,8 @@ import {
   X,
   Sparkles,
   MessageSquare,
+  Send,
   ShieldCheck,
-  Zap,
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
@@ -66,20 +70,17 @@ export interface ActiveRental {
 }
 
 export interface AvailableRentalItem {
-  // VoIP fields
   phoneNumber?: string;
   region?: string;
   countryCode?: string;
   features?: string[];
 
-  // Non-VoIP fields
   serviceId?: number;
   service?: string;
   serviceName?: string;
   isFullAccess?: boolean;
   available?: number;
 
-  // Shared
   monthlyFee?: number;
   pricing?: Record<string, number>;
   lineType?: 'voip' | 'non_voip';
@@ -155,6 +156,15 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
   const [refreshing, setRefreshing] = useState(false);
   const [purchasingKey, setPurchasingKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // ─── Messaging / Outbound SMS Modal State ─────────────────────────────────
+  const [messagesModalRental, setMessagesModalRental] = useState<ActiveRental | null>(null);
+  const [messagesTab, setMessagesTab] = useState<'inbox' | 'compose'>('inbox');
+  const [smsRecipient, setSmsRecipient] = useState('');
+  const [smsText, setSmsText] = useState('');
+  const [sendingSms, setSendingSms] = useState(false);
+  const [loadingThreads, setLoadingThreads] = useState(false);
+  const [threads, setThreads] = useState<any[]>([]);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -324,7 +334,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
     await Clipboard.setStringAsync(text);
     triggerHaptic('success');
     setCopiedKey(key);
-    showToast('Number copied to clipboard!', 'success');
+    showToast('Copied to clipboard!', 'success');
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
@@ -427,12 +437,90 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
     });
   };
 
+  // ─── Open Messages & SMS Modal ───────────────────────────────────────────
+  const openMessagesModal = useCallback(async (rental: ActiveRental) => {
+    setMessagesModalRental(rental);
+    const isVoip = rental.lineType !== 'non_voip';
+    setMessagesTab(isVoip ? 'compose' : 'inbox');
+    setSmsRecipient('');
+    setSmsText('');
+
+    if (isVoip) {
+      setLoadingThreads(true);
+      try {
+        const res = await apiClient.get(`/messaging/${rental.id}/threads`);
+        if (res.data?.success && Array.isArray(res.data.threads)) {
+          setThreads(res.data.threads);
+        } else {
+          setThreads([]);
+        }
+      } catch {
+        setThreads([]);
+      } finally {
+        setLoadingThreads(false);
+      }
+    }
+  }, []);
+
+  const handleSendOutboundSms = async () => {
+    if (!messagesModalRental) return;
+    const to = smsRecipient.trim();
+    const text = smsText.trim();
+    if (!to) {
+      showToast('Enter a destination phone number', 'error');
+      return;
+    }
+    if (!text) {
+      showToast('Enter a message text to send', 'error');
+      return;
+    }
+
+    setSendingSms(true);
+    triggerHaptic('medium');
+    try {
+      const res = await apiClient.post(
+        `/numbers/rentals/${messagesModalRental.id}/send-sms`,
+        { to, text }
+      );
+      if (res.data?.success) {
+        showToast('SMS sent successfully!', 'success');
+        setSmsText('');
+        setSmsRecipient('');
+        // Reload conversation threads
+        try {
+          const thRes = await apiClient.get(`/messaging/${messagesModalRental.id}/threads`);
+          if (thRes.data?.success && Array.isArray(thRes.data.threads)) {
+            setThreads(thRes.data.threads);
+          }
+        } catch {}
+        setMessagesTab('inbox');
+      } else {
+        showDialog({
+          title: 'SMS Failed',
+          message: res.data?.message || 'Could not send SMS.',
+          variant: 'danger',
+          confirmText: 'Got It',
+        });
+      }
+    } catch (err: any) {
+      showDialog({
+        title: 'SMS Notice',
+        message:
+          err?.response?.data?.message ||
+          'Unable to send SMS. Please ensure the recipient number is formatted correctly (same country as this line).',
+        variant: 'danger',
+        confirmText: 'Got It',
+      });
+    } finally {
+      setSendingSms(false);
+    }
+  };
+
   const filteredCatalog = useMemo(() => {
     if (lineType !== 'non_voip') return availableNumbers;
 
     let items = availableNumbers;
 
-    // Category filter
     if (selectedCategory === 'full') {
       items = items.filter((i) => i.isFullAccess);
     } else if (selectedCategory !== 'all') {
@@ -441,7 +529,6 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
       );
     }
 
-    // Search query
     if (!serviceSearch.trim()) return items;
     const q = serviceSearch.toLowerCase().trim();
     return items.filter((i) => {
@@ -487,7 +574,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
               Rental Numbers
             </Text>
             <Text style={[s.pageSubtitle, { color: colors.textMuted }]}>
-              Dedicated 30-day lines for SMS & voice
+              Dedicated 30-day lines for SMS & voice calls
             </Text>
           </View>
 
@@ -550,7 +637,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
               <AnimatedEmptyState
                 type="rentals"
                 title="No Active Rental Numbers"
-                subtitle="You haven't leased any private numbers yet. Rent a dedicated Physical SIM or Virtual VoIP number for 30 days."
+                subtitle="You haven't leased any private numbers yet. Rent a dedicated Non-VoIP SIM or VoIP line for 30 days."
                 actionLabel="Browse Available Lines"
                 onAction={() => setTab('catalog')}
               />
@@ -567,66 +654,64 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                   const isNonVoip = rental.lineType === 'non_voip';
                   const serviceDisplayName = isNonVoip
                     ? rental.serviceName || (rental.isFullAccess ? 'Full Rent (Any Service)' : 'Physical SIM')
-                    : rental.countryName || rental.countryCode || 'Virtual VoIP Line';
+                    : rental.countryName || rental.countryCode || 'VoIP Line';
 
                   return (
-                    <TouchableOpacity
+                    <View
                       key={rental.id}
                       style={[
-                        s.flatRow,
+                        s.activeRentalCard,
                         idx > 0 && {
                           borderTopWidth: 1,
                           borderTopColor: colors.border,
                         },
                       ]}
-                      onPress={() => handleCopy(rental.phoneNumber, rental.id)}
                     >
-                      <View style={{ flex: 1, gap: 3 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <Text style={[s.rentalPhone, { color: colors.text }]}>
-                            {rental.phoneNumber}
-                          </Text>
-                          <View
-                            style={[
-                              s.lineTypeBadge,
-                              {
-                                backgroundColor: isNonVoip
-                                  ? 'rgba(16, 185, 129, 0.15)'
-                                  : 'rgba(37, 99, 235, 0.15)',
-                              },
-                            ]}
-                          >
-                            <Text
+                      {/* Top Info Header */}
+                      <View style={s.activeCardTop}>
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <Text style={[s.rentalPhone, { color: colors.text }]}>
+                              {rental.phoneNumber}
+                            </Text>
+                            <View
                               style={[
-                                s.lineTypeBadgeText,
-                                { color: isNonVoip ? '#10B981' : '#2563EB' },
+                                s.lineTypeBadge,
+                                { backgroundColor: colors.primarySoft },
                               ]}
                             >
-                              {isNonVoip ? 'Physical SIM' : 'VoIP'}
-                            </Text>
+                              <Text
+                                style={[
+                                  s.lineTypeBadgeText,
+                                  { color: colors.primary },
+                                ]}
+                              >
+                                {isNonVoip ? 'Physical SIM' : 'VoIP Leased'}
+                              </Text>
+                            </View>
                           </View>
+                          <Text style={{ fontSize: 12.5, color: colors.textMuted }}>
+                            {serviceDisplayName} {rental.countryName ? `· ${rental.countryName}` : ''}
+                          </Text>
                         </View>
 
-                        <Text style={{ fontSize: 12.5, color: colors.textMuted }}>
-                          {serviceDisplayName} {rental.countryName ? `· ${rental.countryName}` : ''}
+                        <Text
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: '700',
+                            color: exp.isCritical ? '#EF4444' : colors.primary,
+                          }}
+                        >
+                          {exp.label}
                         </Text>
                       </View>
 
-                      <Text
-                        style={{
-                          fontSize: 12.5,
-                          fontWeight: '700',
-                          color: exp.isCritical ? '#EF4444' : '#10B981',
-                          marginRight: 10,
-                        }}
-                      >
-                        {exp.label}
-                      </Text>
-
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      {/* Action Buttons Row */}
+                      <View style={s.activeCardActions}>
+                        {/* Call button for VoIP */}
                         {!isNonVoip && (
                           <TouchableOpacity
-                            style={s.callActionButton}
+                            style={s.blueActionBtn}
                             onPress={() => {
                               triggerHaptic('medium');
                               openDialpad(rental.id, rental.phoneNumber);
@@ -634,30 +719,48 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                             activeOpacity={0.8}
                           >
                             <Phone size={13} color="#FFFFFF" />
-                            <Text style={s.callBtnText}>Call</Text>
+                            <Text style={s.blueActionBtnText}>Call</Text>
                           </TouchableOpacity>
                         )}
 
+                        {/* Messages / Send SMS Button */}
+                        <TouchableOpacity
+                          style={[s.outlineActionBtn, { borderColor: colors.border }]}
+                          onPress={() => {
+                            triggerHaptic('selection');
+                            openMessagesModal(rental);
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <MessageSquare size={13} color={colors.primary} />
+                          <Text style={[s.outlineActionBtnText, { color: colors.primary }]}>
+                            {!isNonVoip ? 'Messages' : 'View SMS'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        {/* Copy Phone */}
                         <TouchableOpacity
                           onPress={() => handleCopy(rental.phoneNumber, rental.id)}
-                          style={{ padding: 4 }}
+                          style={[s.iconActionBtn, { borderColor: colors.border }]}
+                          hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                         >
                           {isCopied ? (
-                            <Check size={17} color="#10B981" />
+                            <Check size={16} color={colors.primary} />
                           ) : (
-                            <Copy size={17} color={colors.textMuted} />
+                            <Copy size={16} color={colors.textMuted} />
                           )}
                         </TouchableOpacity>
 
+                        {/* Cancel / Release Number */}
                         <TouchableOpacity
                           onPress={() => handleCancelRental(rental.id, rental.phoneNumber)}
-                          style={{ padding: 4 }}
+                          style={[s.iconActionBtn, { borderColor: 'rgba(239, 68, 68, 0.25)' }]}
                           hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                         >
-                          <XCircle size={17} color="#EF4444" />
+                          <XCircle size={16} color="#EF4444" />
                         </TouchableOpacity>
                       </View>
-                    </TouchableOpacity>
+                    </View>
                   );
                 })}
               </View>
@@ -677,14 +780,13 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                   }}
                   style={[
                     s.lineTypeCard,
-                    lineType === 'non_voip' && s.lineTypeCardActive,
                     {
                       backgroundColor:
                         lineType === 'non_voip'
-                          ? 'rgba(16, 185, 129, 0.1)'
+                          ? colors.primarySoft
                           : colors.surface,
                       borderColor:
-                        lineType === 'non_voip' ? '#10B981' : colors.border,
+                        lineType === 'non_voip' ? colors.primary : colors.border,
                     },
                   ]}
                 >
@@ -693,7 +795,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                       s.lineTypeIconWrap,
                       {
                         backgroundColor:
-                          lineType === 'non_voip' ? '#10B981' : colors.border,
+                          lineType === 'non_voip' ? colors.primary : colors.border,
                       },
                     ]}
                   >
@@ -704,8 +806,8 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                       <Text style={[s.lineTypeTitle, { color: colors.text }]}>
                         Non-VoIP
                       </Text>
-                      <View style={[s.miniBadge, { backgroundColor: 'rgba(16, 185, 129, 0.2)' }]}>
-                        <Text style={[s.miniBadgeText, { color: '#10B981' }]}>
+                      <View style={[s.miniBadge, { backgroundColor: colors.primarySoft }]}>
+                        <Text style={[s.miniBadgeText, { color: colors.primary }]}>
                           Physical SIM
                         </Text>
                       </View>
@@ -714,7 +816,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                       style={[s.lineTypeSubtitle, { color: colors.textMuted }]}
                       numberOfLines={1}
                     >
-                      Real mobile carrier SIMs
+                      Carrier SIMs · Any App OTP
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -729,14 +831,13 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                   }}
                   style={[
                     s.lineTypeCard,
-                    lineType === 'voip' && s.lineTypeCardActive,
                     {
                       backgroundColor:
                         lineType === 'voip'
-                          ? 'rgba(37, 99, 235, 0.1)'
+                          ? colors.primarySoft
                           : colors.surface,
                       borderColor:
-                        lineType === 'voip' ? '#2563EB' : colors.border,
+                        lineType === 'voip' ? colors.primary : colors.border,
                     },
                   ]}
                 >
@@ -745,7 +846,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                       s.lineTypeIconWrap,
                       {
                         backgroundColor:
-                          lineType === 'voip' ? '#2563EB' : colors.border,
+                          lineType === 'voip' ? colors.primary : colors.border,
                       },
                     ]}
                   >
@@ -754,10 +855,10 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                       <Text style={[s.lineTypeTitle, { color: colors.text }]}>
-                        VoIP
+                        VoIP Lines
                       </Text>
-                      <View style={[s.miniBadge, { backgroundColor: 'rgba(37, 99, 235, 0.2)' }]}>
-                        <Text style={[s.miniBadgeText, { color: '#2563EB' }]}>
+                      <View style={[s.miniBadge, { backgroundColor: colors.primarySoft }]}>
+                        <Text style={[s.miniBadgeText, { color: colors.primary }]}>
                           Calls + SMS
                         </Text>
                       </View>
@@ -772,7 +873,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                 </TouchableOpacity>
               </View>
 
-              {/* ── CONDITIONAL SUB-FILTERS ─────────────────────────────────── */}
+              {/* ── SUB-FILTERS ─────────────────────────────────────────────── */}
               {lineType === 'non_voip' ? (
                 <View style={{ gap: 10 }}>
                   {/* Search Bar */}
@@ -785,7 +886,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                     <Search size={16} color={colors.textMuted} />
                     <TextInput
                       style={[s.searchInput, { color: colors.text }]}
-                      placeholder="Search physical SIM service (e.g. WhatsApp, Full)..."
+                      placeholder="Search service (e.g. WhatsApp, Full, Telegram)..."
                       placeholderTextColor={colors.textMuted}
                       value={serviceSearch}
                       onChangeText={setServiceSearch}
@@ -820,16 +921,16 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                             s.categoryChip,
                             {
                               backgroundColor: isActive
-                                ? 'rgba(16, 185, 129, 0.15)'
+                                ? colors.primarySoft
                                 : colors.surface,
-                              borderColor: isActive ? '#10B981' : colors.border,
+                              borderColor: isActive ? colors.primary : colors.border,
                             },
                           ]}
                         >
                           <Text
                             style={[
                               s.categoryChipText,
-                              { color: isActive ? '#10B981' : colors.textSecondary },
+                              { color: isActive ? colors.primary : colors.textSecondary },
                             ]}
                           >
                             {cat.label}
@@ -861,7 +962,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                             backgroundColor: active
                               ? colors.primarySoft
                               : colors.surface,
-                            borderColor: active ? '#2563EB' : colors.border,
+                            borderColor: active ? colors.primary : colors.border,
                           },
                         ]}
                       >
@@ -869,7 +970,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                         <Text
                           style={[
                             s.countryChipText,
-                            { color: active ? '#2563EB' : colors.textSecondary },
+                            { color: active ? colors.primary : colors.textSecondary },
                           ]}
                         >
                           {c.name}
@@ -933,14 +1034,14 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                                     {
                                       backgroundColor: item.isFullAccess
                                         ? 'rgba(234, 179, 8, 0.15)'
-                                        : 'rgba(16, 185, 129, 0.15)',
+                                        : colors.primarySoft,
                                     },
                                   ]}
                                 >
                                   {item.isFullAccess ? (
                                     <Sparkles size={16} color="#EAB308" />
                                   ) : (
-                                    <Smartphone size={16} color="#10B981" />
+                                    <Smartphone size={16} color={colors.primary} />
                                   )}
                                 </View>
                                 <View style={{ flex: 1 }}>
@@ -955,8 +1056,18 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                                         <Text style={s.goldBadgeText}>★ Full Access</Text>
                                       </View>
                                     ) : item.available !== undefined ? (
-                                      <View style={s.stockBadge}>
-                                        <Text style={s.stockBadgeText}>
+                                      <View
+                                        style={[
+                                          s.stockBadge,
+                                          { backgroundColor: colors.primarySoft },
+                                        ]}
+                                      >
+                                        <Text
+                                          style={[
+                                            s.stockBadgeText,
+                                            { color: colors.primary },
+                                          ]}
+                                        >
                                           {item.available} in stock
                                         </Text>
                                       </View>
@@ -982,12 +1093,12 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                               <View
                                 style={[
                                   s.featurePill,
-                                  { backgroundColor: 'rgba(16, 185, 129, 0.1)' },
+                                  { backgroundColor: colors.primarySoft },
                                 ]}
                               >
-                                <ShieldCheck size={11} color="#10B981" />
+                                <ShieldCheck size={11} color={colors.primary} />
                                 <Text
-                                  style={[s.featurePillText, { color: '#10B981' }]}
+                                  style={[s.featurePillText, { color: colors.primary }]}
                                 >
                                   Physical SIM
                                 </Text>
@@ -1031,7 +1142,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
 
                               <TouchableOpacity
                                 style={[
-                                  s.rentBtnGreen,
+                                  s.rentBtn,
                                   busy && { opacity: 0.7 },
                                 ]}
                                 onPress={() => handleRentNumber(item)}
@@ -1064,7 +1175,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                               },
                             ]}
                           >
-                            <Phone size={17} color="#2563EB" />
+                            <Phone size={17} color={colors.primary} />
                             <View style={{ flex: 1, marginLeft: 12, gap: 2 }}>
                               <Text style={[s.rentalPhone, { color: colors.text }]}>
                                 {item.phoneNumber}
@@ -1098,6 +1209,281 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* ── MESSAGES & OUTBOUND SMS MODAL ─────────────────────────────────── */}
+      <Modal
+        visible={!!messagesModalRental}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setMessagesModalRental(null)}
+      >
+        <KeyboardAvoidingView
+          style={s.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <Pressable
+            style={s.modalBackdrop}
+            onPress={() => setMessagesModalRental(null)}
+          />
+          <View
+            style={[
+              s.messagesModalSheet,
+              { backgroundColor: colors.surface, borderTopColor: colors.border },
+            ]}
+          >
+            <View style={s.sheetHandle} />
+
+            {/* Modal Header */}
+            <View style={s.modalHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[s.modalTitle, { color: colors.text }]}>
+                    {messagesModalRental?.lineType === 'non_voip' ? 'Received SMS & OTPs' : 'Messages & SMS'}
+                  </Text>
+                  <View
+                    style={[
+                      s.miniBadge,
+                      { backgroundColor: colors.primarySoft },
+                    ]}
+                  >
+                    <Text style={[s.miniBadgeText, { color: colors.primary }]}>
+                      {messagesModalRental?.lineType === 'non_voip' ? 'Physical SIM' : 'VoIP'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={[s.modalSubtitle, { color: colors.textMuted }]}>
+                  Line: {messagesModalRental?.phoneNumber}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => setMessagesModalRental(null)}
+                style={s.modalCloseBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <X size={19} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Modal Sub-Tabs (for VoIP: Send SMS vs Inbox) */}
+            {messagesModalRental?.lineType !== 'non_voip' && (
+              <View style={[s.modalTabsRow, { borderBottomColor: colors.border }]}>
+                <TouchableOpacity
+                  style={[
+                    s.modalTabBtn,
+                    messagesTab === 'compose' && {
+                      borderBottomColor: colors.primary,
+                      borderBottomWidth: 2,
+                    },
+                  ]}
+                  onPress={() => {
+                    triggerHaptic('selection');
+                    setMessagesTab('compose');
+                  }}
+                >
+                  <Send
+                    size={14}
+                    color={messagesTab === 'compose' ? colors.primary : colors.textMuted}
+                  />
+                  <Text
+                    style={[
+                      s.modalTabBtnText,
+                      { color: messagesTab === 'compose' ? colors.primary : colors.textMuted },
+                    ]}
+                  >
+                    Send SMS
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    s.modalTabBtn,
+                    messagesTab === 'inbox' && {
+                      borderBottomColor: colors.primary,
+                      borderBottomWidth: 2,
+                    },
+                  ]}
+                  onPress={() => {
+                    triggerHaptic('selection');
+                    setMessagesTab('inbox');
+                  }}
+                >
+                  <MessageSquare
+                    size={14}
+                    color={messagesTab === 'inbox' ? colors.primary : colors.textMuted}
+                  />
+                  <Text
+                    style={[
+                      s.modalTabBtnText,
+                      { color: messagesTab === 'inbox' ? colors.primary : colors.textMuted },
+                    ]}
+                  >
+                    Inbox / History
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Tab Content */}
+            <ScrollView
+              style={{ maxHeight: 400 }}
+              contentContainerStyle={{ paddingVertical: 14, gap: 12 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {messagesTab === 'compose' && messagesModalRental?.lineType !== 'non_voip' ? (
+                <View style={{ gap: 12 }}>
+                  <View style={{ gap: 5 }}>
+                    <Text style={[s.formLabel, { color: colors.textSecondary }]}>
+                      Recipient Phone Number
+                    </Text>
+                    <TextInput
+                      style={[
+                        s.formInput,
+                        { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text },
+                      ]}
+                      placeholder="e.g. +1 555 123 4567"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="phone-pad"
+                      value={smsRecipient}
+                      onChangeText={setSmsRecipient}
+                    />
+                  </View>
+
+                  <View style={{ gap: 5 }}>
+                    <Text style={[s.formLabel, { color: colors.textSecondary }]}>
+                      Message Text
+                    </Text>
+                    <TextInput
+                      style={[
+                        s.formInput,
+                        s.formTextarea,
+                        { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text },
+                      ]}
+                      placeholder="Type your message text here..."
+                      placeholderTextColor={colors.textMuted}
+                      multiline
+                      numberOfLines={3}
+                      value={smsText}
+                      onChangeText={setSmsText}
+                    />
+                  </View>
+
+                  <Text style={[s.formNotice, { color: colors.textMuted }]}>
+                    Standard telecom SMS credits apply. Messages can only be sent to numbers within the same country as this VoIP line.
+                  </Text>
+
+                  <TouchableOpacity
+                    style={[s.modalSendBtn, sendingSms && { opacity: 0.7 }]}
+                    onPress={handleSendOutboundSms}
+                    disabled={sendingSms}
+                  >
+                    {sendingSms ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Send size={15} color="#FFFFFF" />
+                        <Text style={s.modalSendBtnText}>Send Outbound SMS</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                /* Inbox View */
+                <View style={{ gap: 10 }}>
+                  {loadingThreads ? (
+                    <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 20 }} />
+                  ) : (
+                    (() => {
+                      const otps = messagesModalRental?.otps || [];
+                      const hasAny = otps.length > 0 || threads.length > 0;
+
+                      if (!hasAny) {
+                        return (
+                          <View style={s.emptyMessagesBox}>
+                            <MessageSquare size={28} color={colors.textMuted} />
+                            <Text style={[s.emptyMessagesTitle, { color: colors.text }]}>
+                              No messages received yet
+                            </Text>
+                            <Text style={[s.emptyMessagesSub, { color: colors.textMuted }]}>
+                              Verification codes and SMS sent to this number will appear here automatically.
+                            </Text>
+                          </View>
+                        );
+                      }
+
+                      return (
+                        <View style={{ gap: 8 }}>
+                          {/* Render Threads */}
+                          {threads.map((th, i) => (
+                            <View
+                              key={`th-${i}`}
+                              style={[
+                                s.messageBubbleCard,
+                                { backgroundColor: colors.bg, borderColor: colors.border },
+                              ]}
+                            >
+                              <View style={s.messageBubbleHeader}>
+                                <Text style={[s.messageBubbleSender, { color: colors.primary }]}>
+                                  {th.latestMessage?.direction === 'outbound' ? 'Sent to: ' : 'From: '}
+                                  {th.contactName || th.remoteNumber}
+                                </Text>
+                                <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                                  {th.latestMessage?.timestamp
+                                    ? new Date(th.latestMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                    : ''}
+                                </Text>
+                              </View>
+                              <Text style={[s.messageBubbleText, { color: colors.text }]}>
+                                {th.latestMessage?.text}
+                              </Text>
+                            </View>
+                          ))}
+
+                          {/* Render OTPs */}
+                          {otps.map((otp, i) => (
+                            <View
+                              key={`otp-${i}`}
+                              style={[
+                                s.messageBubbleCard,
+                                { backgroundColor: colors.bg, borderColor: colors.border },
+                              ]}
+                            >
+                              <View style={s.messageBubbleHeader}>
+                                <Text style={[s.messageBubbleSender, { color: colors.primary }]}>
+                                  From: {otp.sender || 'Verification Service'}
+                                </Text>
+                                {otp.code ? (
+                                  <TouchableOpacity
+                                    style={[s.otpCodeBadge, { backgroundColor: colors.primarySoft }]}
+                                    onPress={() => handleCopy(otp.code, `otp-${i}`)}
+                                  >
+                                    <Text style={[s.otpCodeText, { color: colors.primary }]}>
+                                      {otp.code}
+                                    </Text>
+                                    <Copy size={11} color={colors.primary} />
+                                  </TouchableOpacity>
+                                ) : null}
+                              </View>
+                              <Text style={[s.messageBubbleText, { color: colors.text }]}>
+                                {otp.message}
+                              </Text>
+                              {otp.receivedAt ? (
+                                <Text style={{ fontSize: 10.5, color: colors.textMuted, marginTop: 4 }}>
+                                  {new Date(otp.receivedAt).toLocaleString()}
+                                </Text>
+                              ) : null}
+                            </View>
+                          ))}
+                        </View>
+                      );
+                    })()
+                  )}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <ModernBottomNav activeTab="rentals" onSelectTab={handleSelectNavTab} />
     </SafeAreaView>
@@ -1162,9 +1548,6 @@ const s = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1.5,
   },
-  lineTypeCardActive: {
-    transform: [{ scale: 1.01 }],
-  },
   lineTypeIconWrap: {
     width: 34,
     height: 34,
@@ -1190,7 +1573,7 @@ const s = StyleSheet.create({
     fontWeight: '800',
   },
   lineTypeBadge: {
-    paddingHorizontal: 6,
+    paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 5,
   },
@@ -1246,6 +1629,54 @@ const s = StyleSheet.create({
     paddingVertical: 15,
     paddingHorizontal: 16,
   },
+  activeRentalCard: {
+    padding: 16,
+    gap: 12,
+  },
+  activeCardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  activeCardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  blueActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  blueActionBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  outlineActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  outlineActionBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  iconActionBtn: {
+    padding: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   serviceRow: {
     padding: 16,
     gap: 12,
@@ -1287,7 +1718,6 @@ const s = StyleSheet.create({
     color: '#EAB308',
   },
   stockBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
@@ -1295,7 +1725,6 @@ const s = StyleSheet.create({
   stockBadgeText: {
     fontSize: 10.5,
     fontWeight: '700',
-    color: '#10B981',
   },
   chipsRow: {
     flexDirection: 'row',
@@ -1322,7 +1751,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
-    backgroundColor: 'rgba(150, 150, 150, 0.1)',
+    backgroundColor: 'rgba(150, 150, 150, 0.08)',
   },
   featurePillTextMuted: {
     fontSize: 11,
@@ -1349,13 +1778,7 @@ const s = StyleSheet.create({
   },
   rentBtn: {
     backgroundColor: '#2563EB',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 10,
-  },
-  rentBtnGreen: {
-    backgroundColor: '#10B981',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 10,
   },
@@ -1363,20 +1786,6 @@ const s = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12.5,
     fontWeight: '800',
-  },
-  callActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#10B981',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  callBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11.5,
-    fontWeight: '700',
   },
   emptyCatalogWrap: {
     paddingVertical: 36,
@@ -1393,5 +1802,150 @@ const s = StyleSheet.create({
     fontSize: 12.5,
     textAlign: 'center',
     lineHeight: 18,
+  },
+
+  // ── Modal Styles ───────────────────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  },
+  messagesModalSheet: {
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderTopWidth: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 32,
+    paddingTop: 10,
+  },
+  sheetHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(150, 150, 150, 0.35)',
+    alignSelf: 'center',
+    marginBottom: 14,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  modalSubtitle: {
+    fontSize: 12.5,
+    marginTop: 2,
+  },
+  modalCloseBtn: {
+    padding: 4,
+  },
+  modalTabsRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    gap: 16,
+    marginTop: 4,
+  },
+  modalTabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 4,
+  },
+  modalTabBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  formLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  formInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 13.5,
+  },
+  formTextarea: {
+    minHeight: 76,
+    textAlignVertical: 'top',
+  },
+  formNotice: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  modalSendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    backgroundColor: '#2563EB',
+    paddingVertical: 12,
+    borderRadius: 11,
+    marginTop: 6,
+  },
+  modalSendBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '800',
+  },
+  emptyMessagesBox: {
+    paddingVertical: 32,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyMessagesTitle: {
+    fontSize: 14.5,
+    fontWeight: '700',
+  },
+  emptyMessagesSub: {
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 17,
+    paddingHorizontal: 20,
+  },
+  messageBubbleCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    gap: 5,
+  },
+  messageBubbleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  messageBubbleSender: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  messageBubbleText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  otpCodeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  otpCodeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1,
   },
 });
