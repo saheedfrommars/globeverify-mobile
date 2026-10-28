@@ -10,8 +10,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Modal,
-  Pressable,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -31,6 +29,9 @@ import {
   Sparkles,
   MessageSquare,
   Send,
+  Plus,
+  ArrowLeft,
+  User,
   ShieldCheck,
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
@@ -93,6 +94,25 @@ export interface RentalCountry {
   flag: string;
 }
 
+interface ChatMessage {
+  id: string;
+  remotePhoneNumber: string;
+  direction: 'inbound' | 'outbound';
+  text: string;
+  timestamp: string;
+  code?: string;
+}
+
+interface ChatThread {
+  remoteNumber: string;
+  contactName: string | null;
+  latestMessage: {
+    text: string;
+    direction: 'inbound' | 'outbound';
+    timestamp: string;
+  };
+}
+
 interface RentalsScreenProps {
   onBack?: () => void;
   onNavigateToHome?: () => void;
@@ -131,6 +151,518 @@ const daysLeft = (expiresAt: string) => {
   return { label: `${days}d left`, isCritical: days <= 3 };
 };
 
+// ─── FULL CHAT INTERFACE COMPONENT (MATCHES WEB MESSAGES PAGE) ─────────────
+const RentalChatView: React.FC<{
+  rental: ActiveRental;
+  onBack: () => void;
+  openDialpad: (id: string, num: string) => void;
+}> = ({ rental, onBack, openDialpad }) => {
+  const { colors, triggerHaptic, showToast } = useAppSettings();
+
+  const isNonVoip = rental.lineType === 'non_voip';
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [selectedThread, setSelectedThread] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [newChatNumber, setNewChatNumber] = useState('');
+  const [isNewChat, setIsNewChat] = useState(false);
+  const [messageText, setMessageText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const scrollViewRef = useRef<any>(null);
+
+  // Load threads for VoIP
+  const loadThreads = useCallback(async () => {
+    if (isNonVoip) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await apiClient.get(`/messaging/${rental.id}/threads`);
+      if (res.data?.success && Array.isArray(res.data.threads)) {
+        setThreads(res.data.threads);
+        if (res.data.threads.length > 0 && !selectedThread && !isNewChat) {
+          setSelectedThread(res.data.threads[0].remoteNumber);
+        }
+      }
+    } catch {
+      // offline / fallback
+    } finally {
+      setLoading(false);
+    }
+  }, [rental.id, isNonVoip, selectedThread, isNewChat]);
+
+  // Load messages for a specific thread
+  const loadMessages = useCallback(
+    async (remoteNumber: string) => {
+      try {
+        const res = await apiClient.get(
+          `/messaging/${rental.id}/thread/${encodeURIComponent(remoteNumber)}`
+        );
+        if (res.data?.success && Array.isArray(res.data.messages)) {
+          const list: ChatMessage[] = res.data.messages.map((m: any) => ({
+            id: m._id || `${m.timestamp}-${Math.random()}`,
+            remotePhoneNumber: m.remotePhoneNumber,
+            direction: m.direction,
+            text: m.text,
+            timestamp: m.timestamp,
+          }));
+          setMessages(list);
+          setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 150);
+        }
+      } catch {
+        // no-op
+      }
+    },
+    [rental.id]
+  );
+
+  useEffect(() => {
+    if (isNonVoip) {
+      // Non-VoIP: Load all incoming OTPs as chat messages
+      const otpMsgs: ChatMessage[] = (rental.otps || []).map((o, idx) => ({
+        id: `otp-${idx}-${o.receivedAt}`,
+        remotePhoneNumber: o.sender || rental.serviceName || 'Verification Service',
+        direction: 'inbound',
+        text: o.message,
+        code: o.code,
+        timestamp: o.receivedAt || new Date().toISOString(),
+      }));
+      setMessages(otpMsgs);
+      setLoading(false);
+    } else {
+      loadThreads();
+    }
+  }, [isNonVoip, rental.otps, rental.serviceName, loadThreads]);
+
+  useEffect(() => {
+    if (!isNonVoip && selectedThread && !isNewChat) {
+      loadMessages(selectedThread);
+    }
+  }, [isNonVoip, selectedThread, isNewChat, loadMessages]);
+
+  // Live polling for incoming SMS every 5 seconds
+  useEffect(() => {
+    if (isNonVoip) return;
+    const interval = setInterval(() => {
+      if (selectedThread && !isNewChat) {
+        loadMessages(selectedThread);
+      }
+      loadThreads();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [isNonVoip, selectedThread, isNewChat, loadMessages, loadThreads]);
+
+  const handleCopy = async (text: string, msg: string = 'Copied to clipboard!') => {
+    await Clipboard.setStringAsync(text);
+    triggerHaptic('success');
+    showToast(msg, 'success');
+  };
+
+  const handleSendMessage = async () => {
+    const text = messageText.trim();
+    const targetNumber = isNewChat ? newChatNumber.trim() : selectedThread?.trim();
+
+    if (!targetNumber) {
+      showToast('Please enter a recipient phone number', 'error');
+      return;
+    }
+    if (!text) {
+      showToast('Please enter a message to send', 'error');
+      return;
+    }
+
+    setSending(true);
+    triggerHaptic('medium');
+
+    // Optimistic UI append
+    const optimisticMsg: ChatMessage = {
+      id: `temp-${Date.now()}`,
+      remotePhoneNumber: targetNumber,
+      direction: 'outbound',
+      text,
+      timestamp: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setMessageText('');
+    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+
+    try {
+      const res = await apiClient.post(`/messaging/${rental.id}/send`, {
+        to: targetNumber,
+        text,
+      });
+
+      if (res.data?.success) {
+        if (isNewChat) {
+          setIsNewChat(false);
+          setSelectedThread(targetNumber);
+        }
+        await loadThreads();
+      } else {
+        showToast(res.data?.message || 'Failed to send SMS', 'error');
+      }
+    } catch (err: any) {
+      // Fallback endpoint
+      try {
+        const fbRes = await apiClient.post(
+          `/numbers/rentals/${rental.id}/send-sms`,
+          { to: targetNumber, text }
+        );
+        if (fbRes.data?.success) {
+          if (isNewChat) {
+            setIsNewChat(false);
+            setSelectedThread(targetNumber);
+          }
+          await loadThreads();
+          return;
+        }
+      } catch {}
+
+      showToast(
+        err?.response?.data?.message || 'Could not send SMS. Check your balance.',
+        'error'
+      );
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const currentDisplayContact = isNewChat
+    ? newChatNumber || 'New Message'
+    : selectedThread || (isNonVoip ? (rental.serviceName || 'SMS Messages') : 'Messages');
+
+  return (
+    <SafeAreaView style={[s.safeArea, { backgroundColor: colors.bg }]} edges={['top', 'bottom']}>
+      <StatusBar style={colors.statusBar} />
+
+      {/* ── CHAT TOP HEADER ──────────────────────────────────────────────── */}
+      <View
+        style={[
+          s.chatHeaderBar,
+          { backgroundColor: colors.surface, borderBottomColor: colors.border },
+        ]}
+      >
+        <TouchableOpacity
+          onPress={onBack}
+          style={s.chatBackBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <ArrowLeft size={20} color={colors.text} />
+        </TouchableOpacity>
+
+        <View style={[s.chatHeaderAvatar, { backgroundColor: colors.primary }]}>
+          <User size={18} color="#FFFFFF" />
+        </View>
+
+        <View style={{ flex: 1, marginLeft: 10 }}>
+          <Text style={[s.chatContactTitle, { color: colors.text }]} numberOfLines={1}>
+            {currentDisplayContact}
+          </Text>
+          <Text style={[s.chatSubTitle, { color: colors.textMuted }]} numberOfLines={1}>
+            via {rental.phoneNumber} · {isNonVoip ? 'Physical SIM' : 'VoIP'}
+          </Text>
+        </View>
+
+        {/* Header Action Buttons */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+          {!isNonVoip && (
+            <>
+              <TouchableOpacity
+                style={[s.chatHeaderIconBtn, { backgroundColor: colors.primarySoft }]}
+                onPress={() => {
+                  const target = selectedThread || newChatNumber || rental.phoneNumber;
+                  openDialpad(rental.id, target);
+                }}
+              >
+                <Phone size={16} color={colors.primary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.chatHeaderIconBtn, { backgroundColor: colors.primarySoft }]}
+                onPress={() => {
+                  setIsNewChat(true);
+                  setNewChatNumber('');
+                  setMessages([]);
+                }}
+              >
+                <Plus size={18} color={colors.primary} />
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </View>
+
+      {/* ── CONVERSATION THREAD PILLS (FOR VOIP) ─────────────────────────── */}
+      {!isNonVoip && threads.length > 0 && (
+        <View
+          style={[
+            s.threadsBar,
+            { backgroundColor: colors.surface, borderBottomColor: colors.border },
+          ]}
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8 }}
+          >
+            <TouchableOpacity
+              onPress={() => {
+                setIsNewChat(true);
+                setNewChatNumber('');
+                setMessages([]);
+              }}
+              style={[
+                s.threadPill,
+                isNewChat
+                  ? { backgroundColor: colors.primary, borderColor: colors.primary }
+                  : { backgroundColor: colors.bg, borderColor: colors.border },
+              ]}
+            >
+              <Plus size={12} color={isNewChat ? '#FFFFFF' : colors.textMuted} />
+              <Text
+                style={[
+                  s.threadPillText,
+                  { color: isNewChat ? '#FFFFFF' : colors.textSecondary },
+                ]}
+              >
+                New Chat
+              </Text>
+            </TouchableOpacity>
+
+            {threads.map((th) => {
+              const isActive = !isNewChat && selectedThread === th.remoteNumber;
+              return (
+                <TouchableOpacity
+                  key={th.remoteNumber}
+                  onPress={() => {
+                    setIsNewChat(false);
+                    setSelectedThread(th.remoteNumber);
+                  }}
+                  style={[
+                    s.threadPill,
+                    isActive
+                      ? { backgroundColor: colors.primary, borderColor: colors.primary }
+                      : { backgroundColor: colors.bg, borderColor: colors.border },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      s.threadPillText,
+                      { color: isActive ? '#FFFFFF' : colors.textSecondary },
+                    ]}
+                  >
+                    {th.contactName || th.remoteNumber}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* ── "TO:" RECIPIENT INPUT FOR NEW CHAT ────────────────────────────── */}
+      {isNewChat && !isNonVoip && (
+        <View
+          style={[
+            s.toBar,
+            { backgroundColor: colors.surface, borderBottomColor: colors.border },
+          ]}
+        >
+          <Text style={[s.toLabel, { color: colors.textMuted }]}>To:</Text>
+          <TextInput
+            style={[s.toInput, { color: colors.text }]}
+            placeholder="Enter recipient phone (e.g. +1 555 123 4567)"
+            placeholderTextColor={colors.textMuted}
+            keyboardType="phone-pad"
+            value={newChatNumber}
+            onChangeText={setNewChatNumber}
+            autoFocus
+          />
+          {newChatNumber.length > 0 && (
+            <TouchableOpacity onPress={() => setNewChatNumber('')}>
+              <X size={15} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* ── CHAT MESSAGES STREAM ─────────────────────────────────────────── */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          style={s.chatScroll}
+          contentContainerStyle={s.chatScrollContent}
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={() =>
+            scrollViewRef.current?.scrollToEnd({ animated: true })
+          }
+        >
+          {loading ? (
+            <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : messages.length === 0 ? (
+            <View style={s.emptyChatBox}>
+              <View style={[s.emptyChatIconBox, { backgroundColor: colors.primarySoft }]}>
+                <MessageSquare size={32} color={colors.primary} />
+              </View>
+              <Text style={[s.emptyChatTitle, { color: colors.text }]}>
+                {isNonVoip ? 'Waiting for SMS Verification' : 'Start a Conversation'}
+              </Text>
+              <Text style={[s.emptyChatSubtitle, { color: colors.textMuted }]}>
+                {isNonVoip
+                  ? 'Incoming SMS OTPs for this dedicated physical SIM will arrive here in real time.'
+                  : 'Send and receive SMS messages directly with this leased VoIP line.'}
+              </Text>
+            </View>
+          ) : (
+            messages.map((msg, idx) => {
+              const isOutbound = msg.direction === 'outbound';
+              return (
+                <View
+                  key={msg.id || idx}
+                  style={[
+                    s.chatBubbleRow,
+                    isOutbound ? s.chatBubbleRowOutbound : s.chatBubbleRowInbound,
+                  ]}
+                >
+                  <View
+                    style={[
+                      s.chatBubble,
+                      isOutbound
+                        ? [s.chatBubbleOutbound, { backgroundColor: colors.primary }]
+                        : [
+                            s.chatBubbleInbound,
+                            { backgroundColor: colors.surface, borderColor: colors.border },
+                          ],
+                    ]}
+                  >
+                    {/* Render Highlighted OTP code if available */}
+                    {msg.code ? (
+                      <View style={s.chatOtpWrap}>
+                        <Text style={s.chatOtpCode}>{msg.code}</Text>
+                        <TouchableOpacity
+                          onPress={() => handleCopy(msg.code!, 'Code copied!')}
+                          style={s.chatOtpCopyBtn}
+                        >
+                          <Copy size={11} color="#FFFFFF" />
+                          <Text style={s.chatOtpCopyText}>Copy</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+
+                    <Text
+                      style={[
+                        s.chatBubbleText,
+                        { color: isOutbound ? '#FFFFFF' : colors.text },
+                      ]}
+                      selectable
+                    >
+                      {msg.text}
+                    </Text>
+
+                    <View style={s.chatBubbleMeta}>
+                      <Text
+                        style={[
+                          s.chatBubbleTime,
+                          {
+                            color: isOutbound
+                              ? 'rgba(255, 255, 255, 0.7)'
+                              : colors.textMuted,
+                          },
+                        ]}
+                      >
+                        {msg.timestamp
+                          ? new Date(msg.timestamp).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : ''}
+                      </Text>
+                      {isOutbound && (
+                        <Check
+                          size={12}
+                          color="rgba(255, 255, 255, 0.8)"
+                          style={{ marginLeft: 3 }}
+                        />
+                      )}
+                    </View>
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </ScrollView>
+
+        {/* ── BOTTOM DOCKED INPUT BAR ────────────────────────────────────── */}
+        {!isNonVoip ? (
+          <View
+            style={[
+              s.bottomInputBar,
+              { backgroundColor: colors.surface, borderTopColor: colors.border },
+            ]}
+          >
+            <View
+              style={[
+                s.inputContainer,
+                { backgroundColor: colors.bg, borderColor: colors.border },
+              ]}
+            >
+              <TextInput
+                style={[s.chatTextInput, { color: colors.text }]}
+                placeholder="Text message..."
+                placeholderTextColor={colors.textMuted}
+                value={messageText}
+                onChangeText={setMessageText}
+                multiline
+                maxLength={1000}
+              />
+
+              <TouchableOpacity
+                style={[
+                  s.chatSendBtn,
+                  {
+                    backgroundColor: messageText.trim()
+                      ? colors.primary
+                      : colors.border,
+                  },
+                ]}
+                onPress={handleSendMessage}
+                disabled={!messageText.trim() || sending}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Send size={15} color="#FFFFFF" />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <View
+            style={[
+              s.bottomNoticeBar,
+              { backgroundColor: colors.surface, borderTopColor: colors.border },
+            ]}
+          >
+            <ShieldCheck size={14} color={colors.primary} />
+            <Text style={[s.bottomNoticeText, { color: colors.textMuted }]}>
+              Physical SIMs are dedicated for receiving SMS verification codes.
+            </Text>
+          </View>
+        )}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+};
+
+// ─── MAIN RENTALS SCREEN ───────────────────────────────────────────────────
 export const RentalsScreen: React.FC<RentalsScreenProps> = ({
   onBack,
   onNavigateToHome,
@@ -157,14 +689,8 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
   const [purchasingKey, setPurchasingKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // ─── Messaging / Outbound SMS Modal State ─────────────────────────────────
-  const [messagesModalRental, setMessagesModalRental] = useState<ActiveRental | null>(null);
-  const [messagesTab, setMessagesTab] = useState<'inbox' | 'compose'>('inbox');
-  const [smsRecipient, setSmsRecipient] = useState('');
-  const [smsText, setSmsText] = useState('');
-  const [sendingSms, setSendingSms] = useState(false);
-  const [loadingThreads, setLoadingThreads] = useState(false);
-  const [threads, setThreads] = useState<any[]>([]);
+  // Active full-screen chat rental
+  const [chatRental, setChatRental] = useState<ActiveRental | null>(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -437,85 +963,6 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
     });
   };
 
-  // ─── Open Messages & SMS Modal ───────────────────────────────────────────
-  const openMessagesModal = useCallback(async (rental: ActiveRental) => {
-    setMessagesModalRental(rental);
-    const isVoip = rental.lineType !== 'non_voip';
-    setMessagesTab(isVoip ? 'compose' : 'inbox');
-    setSmsRecipient('');
-    setSmsText('');
-
-    if (isVoip) {
-      setLoadingThreads(true);
-      try {
-        const res = await apiClient.get(`/messaging/${rental.id}/threads`);
-        if (res.data?.success && Array.isArray(res.data.threads)) {
-          setThreads(res.data.threads);
-        } else {
-          setThreads([]);
-        }
-      } catch {
-        setThreads([]);
-      } finally {
-        setLoadingThreads(false);
-      }
-    }
-  }, []);
-
-  const handleSendOutboundSms = async () => {
-    if (!messagesModalRental) return;
-    const to = smsRecipient.trim();
-    const text = smsText.trim();
-    if (!to) {
-      showToast('Enter a destination phone number', 'error');
-      return;
-    }
-    if (!text) {
-      showToast('Enter a message text to send', 'error');
-      return;
-    }
-
-    setSendingSms(true);
-    triggerHaptic('medium');
-    try {
-      const res = await apiClient.post(
-        `/numbers/rentals/${messagesModalRental.id}/send-sms`,
-        { to, text }
-      );
-      if (res.data?.success) {
-        showToast('SMS sent successfully!', 'success');
-        setSmsText('');
-        setSmsRecipient('');
-        // Reload conversation threads
-        try {
-          const thRes = await apiClient.get(`/messaging/${messagesModalRental.id}/threads`);
-          if (thRes.data?.success && Array.isArray(thRes.data.threads)) {
-            setThreads(thRes.data.threads);
-          }
-        } catch {}
-        setMessagesTab('inbox');
-      } else {
-        showDialog({
-          title: 'SMS Failed',
-          message: res.data?.message || 'Could not send SMS.',
-          variant: 'danger',
-          confirmText: 'Got It',
-        });
-      }
-    } catch (err: any) {
-      showDialog({
-        title: 'SMS Notice',
-        message:
-          err?.response?.data?.message ||
-          'Unable to send SMS. Please ensure the recipient number is formatted correctly (same country as this line).',
-        variant: 'danger',
-        confirmText: 'Got It',
-      });
-    } finally {
-      setSendingSms(false);
-    }
-  };
-
   const filteredCatalog = useMemo(() => {
     if (lineType !== 'non_voip') return availableNumbers;
 
@@ -543,6 +990,17 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
     else if (nav === 'sms') onNavigateToNumbers?.();
     else if (nav === 'wallet') onNavigateToWallet?.();
   };
+
+  // If a chat rental is selected, render the full-screen iMessage chat view!
+  if (chatRental) {
+    return (
+      <RentalChatView
+        rental={chatRental}
+        onBack={() => setChatRental(null)}
+        openDialpad={openDialpad}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={[s.safeArea, { backgroundColor: colors.bg }]} edges={['top']}>
@@ -723,12 +1181,12 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                           </TouchableOpacity>
                         )}
 
-                        {/* Messages / Send SMS Button */}
+                        {/* Messages Chat View Button */}
                         <TouchableOpacity
                           style={[s.outlineActionBtn, { borderColor: colors.border }]}
                           onPress={() => {
                             triggerHaptic('selection');
-                            openMessagesModal(rental);
+                            setChatRental(rental);
                           }}
                           activeOpacity={0.8}
                         >
@@ -1210,281 +1668,6 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* ── MESSAGES & OUTBOUND SMS MODAL ─────────────────────────────────── */}
-      <Modal
-        visible={!!messagesModalRental}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setMessagesModalRental(null)}
-      >
-        <KeyboardAvoidingView
-          style={s.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <Pressable
-            style={s.modalBackdrop}
-            onPress={() => setMessagesModalRental(null)}
-          />
-          <View
-            style={[
-              s.messagesModalSheet,
-              { backgroundColor: colors.surface, borderTopColor: colors.border },
-            ]}
-          >
-            <View style={s.sheetHandle} />
-
-            {/* Modal Header */}
-            <View style={s.modalHeaderRow}>
-              <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={[s.modalTitle, { color: colors.text }]}>
-                    {messagesModalRental?.lineType === 'non_voip' ? 'Received SMS & OTPs' : 'Messages & SMS'}
-                  </Text>
-                  <View
-                    style={[
-                      s.miniBadge,
-                      { backgroundColor: colors.primarySoft },
-                    ]}
-                  >
-                    <Text style={[s.miniBadgeText, { color: colors.primary }]}>
-                      {messagesModalRental?.lineType === 'non_voip' ? 'Physical SIM' : 'VoIP'}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={[s.modalSubtitle, { color: colors.textMuted }]}>
-                  Line: {messagesModalRental?.phoneNumber}
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                onPress={() => setMessagesModalRental(null)}
-                style={s.modalCloseBtn}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <X size={19} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Modal Sub-Tabs (for VoIP: Send SMS vs Inbox) */}
-            {messagesModalRental?.lineType !== 'non_voip' && (
-              <View style={[s.modalTabsRow, { borderBottomColor: colors.border }]}>
-                <TouchableOpacity
-                  style={[
-                    s.modalTabBtn,
-                    messagesTab === 'compose' && {
-                      borderBottomColor: colors.primary,
-                      borderBottomWidth: 2,
-                    },
-                  ]}
-                  onPress={() => {
-                    triggerHaptic('selection');
-                    setMessagesTab('compose');
-                  }}
-                >
-                  <Send
-                    size={14}
-                    color={messagesTab === 'compose' ? colors.primary : colors.textMuted}
-                  />
-                  <Text
-                    style={[
-                      s.modalTabBtnText,
-                      { color: messagesTab === 'compose' ? colors.primary : colors.textMuted },
-                    ]}
-                  >
-                    Send SMS
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    s.modalTabBtn,
-                    messagesTab === 'inbox' && {
-                      borderBottomColor: colors.primary,
-                      borderBottomWidth: 2,
-                    },
-                  ]}
-                  onPress={() => {
-                    triggerHaptic('selection');
-                    setMessagesTab('inbox');
-                  }}
-                >
-                  <MessageSquare
-                    size={14}
-                    color={messagesTab === 'inbox' ? colors.primary : colors.textMuted}
-                  />
-                  <Text
-                    style={[
-                      s.modalTabBtnText,
-                      { color: messagesTab === 'inbox' ? colors.primary : colors.textMuted },
-                    ]}
-                  >
-                    Inbox / History
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Tab Content */}
-            <ScrollView
-              style={{ maxHeight: 400 }}
-              contentContainerStyle={{ paddingVertical: 14, gap: 12 }}
-              showsVerticalScrollIndicator={false}
-            >
-              {messagesTab === 'compose' && messagesModalRental?.lineType !== 'non_voip' ? (
-                <View style={{ gap: 12 }}>
-                  <View style={{ gap: 5 }}>
-                    <Text style={[s.formLabel, { color: colors.textSecondary }]}>
-                      Recipient Phone Number
-                    </Text>
-                    <TextInput
-                      style={[
-                        s.formInput,
-                        { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text },
-                      ]}
-                      placeholder="e.g. +1 555 123 4567"
-                      placeholderTextColor={colors.textMuted}
-                      keyboardType="phone-pad"
-                      value={smsRecipient}
-                      onChangeText={setSmsRecipient}
-                    />
-                  </View>
-
-                  <View style={{ gap: 5 }}>
-                    <Text style={[s.formLabel, { color: colors.textSecondary }]}>
-                      Message Text
-                    </Text>
-                    <TextInput
-                      style={[
-                        s.formInput,
-                        s.formTextarea,
-                        { backgroundColor: colors.bg, borderColor: colors.border, color: colors.text },
-                      ]}
-                      placeholder="Type your message text here..."
-                      placeholderTextColor={colors.textMuted}
-                      multiline
-                      numberOfLines={3}
-                      value={smsText}
-                      onChangeText={setSmsText}
-                    />
-                  </View>
-
-                  <Text style={[s.formNotice, { color: colors.textMuted }]}>
-                    Standard telecom SMS credits apply. Messages can only be sent to numbers within the same country as this VoIP line.
-                  </Text>
-
-                  <TouchableOpacity
-                    style={[s.modalSendBtn, sendingSms && { opacity: 0.7 }]}
-                    onPress={handleSendOutboundSms}
-                    disabled={sendingSms}
-                  >
-                    {sendingSms ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <>
-                        <Send size={15} color="#FFFFFF" />
-                        <Text style={s.modalSendBtnText}>Send Outbound SMS</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                /* Inbox View */
-                <View style={{ gap: 10 }}>
-                  {loadingThreads ? (
-                    <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 20 }} />
-                  ) : (
-                    (() => {
-                      const otps = messagesModalRental?.otps || [];
-                      const hasAny = otps.length > 0 || threads.length > 0;
-
-                      if (!hasAny) {
-                        return (
-                          <View style={s.emptyMessagesBox}>
-                            <MessageSquare size={28} color={colors.textMuted} />
-                            <Text style={[s.emptyMessagesTitle, { color: colors.text }]}>
-                              No messages received yet
-                            </Text>
-                            <Text style={[s.emptyMessagesSub, { color: colors.textMuted }]}>
-                              Verification codes and SMS sent to this number will appear here automatically.
-                            </Text>
-                          </View>
-                        );
-                      }
-
-                      return (
-                        <View style={{ gap: 8 }}>
-                          {/* Render Threads */}
-                          {threads.map((th, i) => (
-                            <View
-                              key={`th-${i}`}
-                              style={[
-                                s.messageBubbleCard,
-                                { backgroundColor: colors.bg, borderColor: colors.border },
-                              ]}
-                            >
-                              <View style={s.messageBubbleHeader}>
-                                <Text style={[s.messageBubbleSender, { color: colors.primary }]}>
-                                  {th.latestMessage?.direction === 'outbound' ? 'Sent to: ' : 'From: '}
-                                  {th.contactName || th.remoteNumber}
-                                </Text>
-                                <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                                  {th.latestMessage?.timestamp
-                                    ? new Date(th.latestMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                    : ''}
-                                </Text>
-                              </View>
-                              <Text style={[s.messageBubbleText, { color: colors.text }]}>
-                                {th.latestMessage?.text}
-                              </Text>
-                            </View>
-                          ))}
-
-                          {/* Render OTPs */}
-                          {otps.map((otp, i) => (
-                            <View
-                              key={`otp-${i}`}
-                              style={[
-                                s.messageBubbleCard,
-                                { backgroundColor: colors.bg, borderColor: colors.border },
-                              ]}
-                            >
-                              <View style={s.messageBubbleHeader}>
-                                <Text style={[s.messageBubbleSender, { color: colors.primary }]}>
-                                  From: {otp.sender || 'Verification Service'}
-                                </Text>
-                                {otp.code ? (
-                                  <TouchableOpacity
-                                    style={[s.otpCodeBadge, { backgroundColor: colors.primarySoft }]}
-                                    onPress={() => handleCopy(otp.code, `otp-${i}`)}
-                                  >
-                                    <Text style={[s.otpCodeText, { color: colors.primary }]}>
-                                      {otp.code}
-                                    </Text>
-                                    <Copy size={11} color={colors.primary} />
-                                  </TouchableOpacity>
-                                ) : null}
-                              </View>
-                              <Text style={[s.messageBubbleText, { color: colors.text }]}>
-                                {otp.message}
-                              </Text>
-                              {otp.receivedAt ? (
-                                <Text style={{ fontSize: 10.5, color: colors.textMuted, marginTop: 4 }}>
-                                  {new Date(otp.receivedAt).toLocaleString()}
-                                </Text>
-                              ) : null}
-                            </View>
-                          ))}
-                        </View>
-                      );
-                    })()
-                  )}
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
       <ModernBottomNav activeTab="rentals" onSelectTab={handleSelectNavTab} />
     </SafeAreaView>
   );
@@ -1804,148 +1987,215 @@ const s = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // ── Modal Styles ───────────────────────────────────────────────────────────
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  modalBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-  },
-  messagesModalSheet: {
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    borderTopWidth: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 32,
-    paddingTop: 10,
-  },
-  sheetHandle: {
-    width: 38,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(150, 150, 150, 0.35)',
-    alignSelf: 'center',
-    marginBottom: 14,
-  },
-  modalHeaderRow: {
+  // ── Chat Screen Styles (iMessage Web Parity) ─────────────────────────────
+  chatHeaderBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 12,
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  modalSubtitle: {
-    fontSize: 12.5,
-    marginTop: 2,
-  },
-  modalCloseBtn: {
-    padding: 4,
-  },
-  modalTabsRow: {
-    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    gap: 16,
-    marginTop: 4,
   },
-  modalTabBtn: {
+  chatBackBtn: {
+    padding: 6,
+    marginRight: 6,
+  },
+  chatHeaderAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatContactTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  chatSubTitle: {
+    fontSize: 11.5,
+    marginTop: 1,
+  },
+  chatHeaderIconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  threadsBar: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+  },
+  threadPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 9,
-    paddingHorizontal: 4,
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
   },
-  modalTabBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  formLabel: {
+  threadPillText: {
     fontSize: 12,
     fontWeight: '700',
   },
-  formInput: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
+  toBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
     paddingVertical: 9,
+    borderBottomWidth: 1,
+    gap: 8,
+  },
+  toLabel: {
     fontSize: 13.5,
+    fontWeight: '700',
   },
-  formTextarea: {
-    minHeight: 76,
-    textAlignVertical: 'top',
+  toInput: {
+    flex: 1,
+    fontSize: 14,
+    padding: 0,
   },
-  formNotice: {
+  chatScroll: {
+    flex: 1,
+  },
+  chatScrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 12,
+  },
+  emptyChatBox: {
+    paddingVertical: 60,
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 30,
+  },
+  emptyChatIconBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyChatTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  emptyChatSubtitle: {
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 19,
+  },
+  chatBubbleRow: {
+    flexDirection: 'row',
+    width: '100%',
+  },
+  chatBubbleRowOutbound: {
+    justifyContent: 'flex-end',
+  },
+  chatBubbleRowInbound: {
+    justifyContent: 'flex-start',
+  },
+  chatBubble: {
+    maxWidth: '82%',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+    gap: 4,
+  },
+  chatBubbleOutbound: {
+    borderBottomRightRadius: 4,
+  },
+  chatBubbleInbound: {
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+  },
+  chatBubbleText: {
+    fontSize: 14.5,
+    lineHeight: 20,
+  },
+  chatBubbleMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 2,
+  },
+  chatBubbleTime: {
+    fontSize: 10.5,
+    fontWeight: '500',
+  },
+  chatOtpWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginBottom: 4,
+    gap: 12,
+  },
+  chatOtpCode: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 2,
+  },
+  chatOtpCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+  },
+  chatOtpCopyText: {
     fontSize: 11,
-    lineHeight: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
-  modalSendBtn: {
+  bottomInputBar: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 22,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 7 : 4,
+    gap: 8,
+  },
+  chatTextInput: {
+    flex: 1,
+    fontSize: 14,
+    maxHeight: 90,
+    padding: 0,
+  },
+  chatSendBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bottomNoticeBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
-    backgroundColor: '#2563EB',
+    gap: 6,
+    paddingHorizontal: 16,
     paddingVertical: 12,
-    borderRadius: 11,
-    marginTop: 6,
+    borderTopWidth: 1,
   },
-  modalSendBtnText: {
-    color: '#FFFFFF',
-    fontSize: 13.5,
-    fontWeight: '800',
-  },
-  emptyMessagesBox: {
-    paddingVertical: 32,
-    alignItems: 'center',
-    gap: 8,
-  },
-  emptyMessagesTitle: {
-    fontSize: 14.5,
-    fontWeight: '700',
-  },
-  emptyMessagesSub: {
+  bottomNoticeText: {
     fontSize: 12,
+    fontWeight: '500',
     textAlign: 'center',
-    lineHeight: 17,
-    paddingHorizontal: 20,
-  },
-  messageBubbleCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 12,
-    gap: 5,
-  },
-  messageBubbleHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  messageBubbleSender: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  messageBubbleText: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  otpCodeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  otpCodeText: {
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1,
   },
 });
