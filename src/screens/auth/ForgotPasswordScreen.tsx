@@ -58,6 +58,7 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
   return (
     <AuthLayout
       title="Reset Password"
+      onBack={onBackToLogin}
       subtitle={
         <Text style={[typography.body, { color: colors.textSecondary }]}>
           Enter your email to receive a password recovery code.
@@ -145,7 +146,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   submitBtn: {
-    marginTop: 10,
+    marginTop: 14,
+    borderRadius: 27,
+    minHeight: 54,
   },
   backBtn: {
     alignItems: 'center',

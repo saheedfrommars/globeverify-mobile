@@ -7,54 +7,91 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  TouchableOpacity,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
+import Svg, { Path, Ellipse, G, Defs, LinearGradient, Stop } from 'react-native-svg';
+import { ArrowLeft, Shield } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../theme';
-import { Logo } from '../../components/ui/Logo';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export interface AuthLayoutProps {
   children: React.ReactNode;
   title: string;
   subtitle?: React.ReactNode;
+  onBack?: () => void;
 }
 
 export const AuthLayout: React.FC<AuthLayoutProps> = ({
   children,
   title,
   subtitle,
+  onBack,
 }) => {
   const { colors, spacing, typography, isDark } = useTheme();
   const insets = useSafeAreaInsets();
 
-  const bgGradient = isDark
-    ? (['#080d1a', '#040711', '#020307'] as const)
-    : (['#edf2f7', '#f8fafc', '#ffffff'] as const);
+  const handleBack = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onBack?.();
+  };
 
-  const glowGradient = isDark
-    ? (['rgba(59, 130, 246, 0.22)', 'rgba(139, 92, 246, 0.12)', 'transparent'] as const)
-    : (['rgba(37, 99, 235, 0.10)', 'rgba(124, 58, 237, 0.05)', 'transparent'] as const);
+  const themeColors = isDark
+    ? {
+        bg: '#0A0A0A',
+        surface: '#121214',
+        border: '#242730',
+        text: '#FFFFFF',
+        textSecondary: '#94A3B8',
+        meshPrimary: '#38BDF8',
+        meshOpacityHigh: 0.35,
+        meshOpacityLow: 0.08,
+      }
+    : {
+        bg: '#F8FAFC',
+        surface: '#FFFFFF',
+        border: '#E2E8F0',
+        text: '#0F172A',
+        textSecondary: '#475569',
+        meshPrimary: '#2563EB',
+        meshOpacityHigh: 0.22,
+        meshOpacityLow: 0.04,
+      };
 
   return (
-    <View style={styles.root}>
-      {/* Background Deep Gradient */}
-      <LinearGradient
-        colors={bgGradient}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0.8, y: 1 }}
-      />
+    <View style={[styles.root, { backgroundColor: themeColors.bg }]}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
 
-      {/* Top Ambient Brand Glow */}
-      <View style={styles.glowContainer} pointerEvents="none">
-        <LinearGradient
-          colors={glowGradient}
-          style={styles.ambientGlow}
-          start={{ x: 0.2, y: 0 }}
-          end={{ x: 0.8, y: 1 }}
-        />
+      {/* ── Subtle Cyber Mesh Background Lines (Matches Onboarding) ── */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <Svg width={SCREEN_WIDTH} height={SCREEN_HEIGHT} viewBox={`0 0 ${SCREEN_WIDTH} ${SCREEN_HEIGHT}`}>
+          <Defs>
+            <LinearGradient id="authMeshGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor={themeColors.meshPrimary} stopOpacity={themeColors.meshOpacityHigh} />
+              <Stop offset="70%" stopColor={themeColors.meshPrimary} stopOpacity={themeColors.meshOpacityLow} />
+              <Stop offset="100%" stopColor={themeColors.meshPrimary} stopOpacity="0.0" />
+            </LinearGradient>
+          </Defs>
+
+          {/* Top-Right Wireframe Rings */}
+          <G transform={`translate(${SCREEN_WIDTH * 0.85}, ${SCREEN_HEIGHT * 0.08}) rotate(-25)`}>
+            <Ellipse cx="0" cy="0" rx="140" ry="60" stroke="url(#authMeshGrad)" strokeWidth="1.2" fill="none" />
+            <Ellipse cx="0" cy="0" rx="115" ry="48" stroke="url(#authMeshGrad)" strokeWidth="1.0" fill="none" />
+            <Ellipse cx="0" cy="0" rx="90" ry="36" stroke="url(#authMeshGrad)" strokeWidth="0.8" fill="none" />
+          </G>
+
+          {/* Sweeping subtle background wave line */}
+          <Path
+            d={`M -20 ${SCREEN_HEIGHT * 0.16} C ${SCREEN_WIDTH * 0.35} ${SCREEN_HEIGHT * 0.22}, ${SCREEN_WIDTH * 0.65} ${SCREEN_HEIGHT * 0.12}, ${SCREEN_WIDTH + 20} ${SCREEN_HEIGHT * 0.20}`}
+            stroke="url(#authMeshGrad)"
+            strokeWidth="1.2"
+            fill="none"
+          />
+        </Svg>
       </View>
 
       <KeyboardAvoidingView
@@ -65,25 +102,53 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
           contentContainerStyle={[
             styles.scrollContent,
             {
-              paddingTop: Math.max(insets.top + spacing.base, 32),
-              paddingBottom: Math.max(insets.bottom + spacing.xl, 40),
+              paddingTop: Math.max(insets.top, 20) + 10,
+              paddingBottom: Math.max(insets.bottom, 20) + 24,
               paddingHorizontal: spacing.xl,
             },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Logo Section — Pure transparent logo, unboxed, no circle */}
-          <View style={styles.logoRow}>
-            <Logo size={56} />
+          {/* ── Top Bar: Back Button & Solid Official Logo at Top Edge ── */}
+          <View style={styles.topBarRow}>
+            {onBack ? (
+              <TouchableOpacity
+                onPress={handleBack}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                style={[
+                  styles.backBtn,
+                  {
+                    backgroundColor: themeColors.surface,
+                    borderColor: themeColors.border,
+                  },
+                ]}
+                activeOpacity={0.7}
+              >
+                <ArrowLeft size={18} color={themeColors.text} strokeWidth={2.4} />
+              </TouchableOpacity>
+            ) : (
+              <View style={{ width: 40 }} />
+            )}
+
+            {/* Official Solid App Icon on the Top Edge */}
+            <View style={[styles.solidLogoCard, { borderColor: themeColors.border }]}>
+              <Image
+                source={require('../../../assets/icon.png')}
+                style={styles.logoImage}
+                resizeMode="cover"
+              />
+            </View>
+
+            <View style={{ width: 40 }} />
           </View>
 
-          {/* Form Header — Direct on canvas, matching website .auth-header */}
+          {/* ── Header Title & Subtitle ── */}
           <View style={styles.header}>
             <Text
               style={[
-                typography.largeTitle,
-                { color: colors.text, fontWeight: '800', letterSpacing: -0.6 },
+                styles.titleText,
+                { color: themeColors.text },
               ]}
             >
               {title}
@@ -91,15 +156,16 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
             {subtitle && <View style={styles.subtitleWrapper}>{subtitle}</View>}
           </View>
 
-          {/* Form Fields & Interactive Controls — Direct flow with no card wrapping */}
+          {/* ── Form Fields & Content ── */}
           <View style={styles.formContent}>
             {children}
           </View>
 
-          {/* Footer Security Guarantee */}
+          {/* ── Footer Trust Guarantee ── */}
           <View style={styles.footer}>
+            <Shield size={13} color={colors.textTertiary} />
             <Text style={[typography.caption1, { color: colors.textTertiary, textAlign: 'center' }]}>
-              © 2025 GlobeVerify Inc. • Private & Encrypted
+              GlobeVerify Telecom • 256-Bit TLS Encrypted
             </Text>
           </View>
         </ScrollView>
@@ -112,20 +178,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
   },
-  glowContainer: {
-    position: 'absolute',
-    top: -60,
-    left: -SCREEN_WIDTH * 0.1,
-    width: SCREEN_WIDTH * 1.2,
-    height: 280,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ambientGlow: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 140,
-  },
   keyboardContainer: {
     flex: 1,
   },
@@ -133,12 +185,47 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
   },
-  logoRow: {
-    alignItems: 'flex-start',
-    marginBottom: 24,
+  topBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 28,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  solidLogoCard: {
+    width: 52,
+    height: 52,
+    borderRadius: 15,
+    borderWidth: 1,
+    overflow: 'hidden',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
   },
   header: {
     marginBottom: 24,
+  },
+  titleText: {
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+    lineHeight: 36,
   },
   subtitleWrapper: {
     marginTop: 6,
@@ -147,7 +234,11 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   footer: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 28,
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 36,
+    paddingTop: 12,
   },
 });

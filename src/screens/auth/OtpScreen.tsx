@@ -196,6 +196,7 @@ export const OtpScreen: React.FC<OtpScreenProps> = ({
 
   return (
     <AuthLayout
+      onBack={onBackToLogin}
       title={
         useBackupCode
           ? 'Enter Backup Code'
@@ -450,7 +451,7 @@ const styles = StyleSheet.create({
     width: 46,
     height: 56,
     borderWidth: 1.5,
-    borderRadius: 12,
+    borderRadius: 14,
     fontSize: 22,
     fontWeight: '800',
     textAlign: 'center',
@@ -472,6 +473,8 @@ const styles = StyleSheet.create({
   },
   verifyBtn: {
     marginTop: 14,
+    borderRadius: 27,
+    minHeight: 54,
   },
   backBtn: {
     alignItems: 'center',

@@ -69,6 +69,7 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
   return (
     <AuthLayout
       title="Set new password"
+      onBack={onBackToLogin}
       subtitle={
         <Text style={[typography.body, { color: colors.textSecondary }]}>
           Enter the code sent to <Text style={{ color: colors.text, fontWeight: '700' }}>{email}</Text> and your new password.
@@ -168,7 +169,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   submitBtn: {
-    marginTop: 10,
+    marginTop: 14,
+    borderRadius: 27,
+    minHeight: 54,
   },
   backBtn: {
     alignItems: 'center',

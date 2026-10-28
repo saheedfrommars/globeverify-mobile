@@ -320,6 +320,7 @@ function MainNavigator() {
             setCurrentStep('otp');
           }}
           onLoginSuccess={() => setCurrentStep('dashboard')}
+          onBack={() => setCurrentStep('onboarding')}
         />
       );
 
@@ -331,6 +332,7 @@ function MainNavigator() {
             setOtpParams({ email, type });
             setCurrentStep('otp');
           }}
+          onBack={() => setCurrentStep('onboarding')}
         />
       );
 

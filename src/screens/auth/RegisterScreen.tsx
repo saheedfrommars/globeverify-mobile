@@ -37,11 +37,13 @@ import { getPendingReferral, clearPendingReferral } from '../../services/deepLin
 export interface RegisterScreenProps {
   onNavigateToLogin: () => void;
   onNavigateToOtp: (params: { email: string; type: 'register' }) => void;
+  onBack?: () => void;
 }
 
 export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   onNavigateToLogin,
   onNavigateToOtp,
+  onBack,
 }) => {
   const { colors, spacing, typography, isDark } = useTheme();
 
@@ -139,6 +141,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
   return (
     <AuthLayout
       title="Create an account"
+      onBack={onBack}
       subtitle={
         <Text style={[typography.body, { color: colors.textSecondary }]}>
           Already have an account?{' '}
@@ -152,7 +155,11 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
       }
     >
       {/* Google Authentication (Top on web) */}
-      <GoogleButton onPress={handleGoogleAuth} title="Sign up with Google" />
+      <GoogleButton
+        onPress={handleGoogleAuth}
+        title="Sign up with Google"
+        style={styles.googleBtn}
+      />
 
       {/* Divider */}
       <View style={styles.dividerRow}>
@@ -409,7 +416,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     minHeight: 52,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 16,
   },
   countryContent: {
@@ -428,7 +435,13 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   submitBtn: {
-    marginTop: 8,
+    marginTop: 12,
+    borderRadius: 27,
+    minHeight: 54,
+  },
+  googleBtn: {
+    borderRadius: 27,
+    minHeight: 52,
   },
   termsAgreementWrap: {
     marginTop: 14,

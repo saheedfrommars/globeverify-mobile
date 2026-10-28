@@ -26,6 +26,7 @@ export interface LoginScreenProps {
   onNavigateToForgot: () => void;
   onNavigateToOtp: (params: { email: string; type: 'login'; twoFactorMethod?: string }) => void;
   onLoginSuccess: () => void;
+  onBack?: () => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
@@ -33,6 +34,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onNavigateToForgot,
   onNavigateToOtp,
   onLoginSuccess,
+  onBack,
 }) => {
   const { colors, spacing, typography, isDark } = useTheme();
   const { login } = useAuth();
@@ -110,6 +112,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   return (
     <AuthLayout
       title="Welcome back"
+      onBack={onBack}
       subtitle={
         <Text style={[typography.body, { color: colors.textSecondary }]}>
           New to GlobeVerify?{' '}
@@ -229,7 +232,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       </View>
 
       {/* Google Authentication */}
-      <GoogleButton onPress={handleGoogleAuth} />
+      <GoogleButton onPress={handleGoogleAuth} style={styles.googleBtn} />
 
       {/* Legal Agreement / Compliance Notice */}
       <View style={styles.termsAgreementWrap}>
@@ -290,7 +293,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   submitBtn: {
-    marginTop: 8,
+    marginTop: 12,
+    borderRadius: 27,
+    minHeight: 54,
+  },
+  googleBtn: {
+    borderRadius: 27,
+    minHeight: 52,
   },
   dividerRow: {
     flexDirection: 'row',
