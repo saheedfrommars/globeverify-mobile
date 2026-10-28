@@ -118,9 +118,8 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
   const [txFilter, setTxFilter] = useState<'all' | 'credit' | 'debit'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Smooth entrance animation
-  const fadeAnim = useRef(new Animated.Value(initialCachedTx ? 1 : 0)).current;
-  const slideAnim = useRef(new Animated.Value(initialCachedTx ? 0 : 8)).current;
+  // Instant render without layout shifts
+  const fadeAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     if (!initialCachedTx) {
@@ -130,23 +129,8 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
           setLoading(false);
         }
       });
-
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 240,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 240,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start();
     }
-  }, [fadeAnim, slideAnim, initialCachedTx]);
+  }, [initialCachedTx]);
 
   const isUserNgn = displayCurrency === 'NGN';
   const userSymbol = isUserNgn ? '₦' : '$';
@@ -374,7 +358,6 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
 
       <ModernHeader
         title="Wallet"
-        onBack={onBack}
         onRefresh={onRefresh}
         isRefreshing={refreshing}
         onPressProfile={onNavigateToMore}
@@ -392,10 +375,8 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
           />
         }
       >
-        <Animated.View
+        <View
           style={{
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
             gap: 24,
           }}
         >
@@ -911,7 +892,7 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
               </View>
             )}
           </View>
-        </Animated.View>
+        </View>
 
         <View style={{ height: 100 }} />
       </ScrollView>

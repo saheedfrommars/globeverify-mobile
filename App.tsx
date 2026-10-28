@@ -8,7 +8,7 @@ import {
 } from './src/services/deepLinkService';
 import { setupNotificationResponseListener } from './src/services/pushNotificationService';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { WalletSettingsProvider } from './src/context/WalletSettingsContext';
 import { CallProvider } from './src/context/CallContext';
@@ -407,7 +407,7 @@ function MainNavigator() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <AuthProvider>
         <MainNavigator />
       </AuthProvider>

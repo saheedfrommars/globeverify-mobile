@@ -67,6 +67,58 @@ interface MyNumbersScreenProps {
   onNavigateToRentals?: () => void;
 }
 
+const CHEAP_SERVICE_NAME_MAP: Record<string, string> = {
+  wa: 'WhatsApp',
+  tg: 'Telegram',
+  ig: 'Instagram',
+  fb: 'Facebook',
+  go: 'Google / YouTube',
+  tw: 'Twitter / X',
+  ds: 'Discord',
+  vi: 'Viber',
+  ti: 'TikTok',
+  nf: 'Netflix',
+  am: 'Amazon',
+  ap: 'Apple',
+  ub: 'Uber',
+  wb: 'WeChat',
+  mm: 'Microsoft',
+  ya: 'Yandex',
+  vk: 'VKontakte',
+  sn: 'Snapchat',
+  ts: 'PayPal',
+  oi: 'Tinder',
+  ot: 'Other Service',
+  line: 'LINE',
+  ka: 'KakaoTalk',
+  kf: 'Kufar',
+  bd: 'Badoo',
+  re: 'Reddit',
+  li: 'LinkedIn',
+  sc: 'SoundCloud',
+  st: 'Steam',
+};
+
+const formatServiceName = (name?: string, slug?: string): string => {
+  if (name && name.length > 3 && !CHEAP_SERVICE_NAME_MAP[name.toLowerCase()]) {
+    return name;
+  }
+  const key = (slug || name || '').toLowerCase().trim();
+  if (CHEAP_SERVICE_NAME_MAP[key]) return CHEAP_SERVICE_NAME_MAP[key];
+  if (name && name.length > 1) return name.charAt(0).toUpperCase() + name.slice(1);
+  if (slug && slug.length > 1) return slug.charAt(0).toUpperCase() + slug.slice(1);
+  return name || slug || 'Verification';
+};
+
+const extractOtpCode = (code?: string, message?: string): string => {
+  if (code && code.length <= 10 && !/\s/.test(code)) return code;
+  const text = message || code || '';
+  const match =
+    text.match(/(?:code|is|pin|verification|otp)[:\s-]*([A-Z0-9]{4,8})\b/i) ||
+    text.match(/\b(\d{4,8})\b/);
+  return match ? match[1] : (code || 'Code');
+};
+
 const cleanMessage = (msg?: string): string => {
   if (!msg) return '';
   return msg
@@ -532,19 +584,22 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
         ) : (
           <Animated.View style={{ opacity: fadeAnim, gap: 16 }}>
             {displayedList.map((num) => {
-              const isPhoneCopied = copiedKey === `ph-${num.id}`;
+              const numId = num.id || (num as any)._id || num.phoneNumber;
+              const isPhoneCopied = copiedKey === `ph-${numId}`;
               const isHistory = activeTab === 'history';
-              const isBusy = actionLoadingId === num.id;
+              const isBusy = actionLoadingId === numId;
               const dotColor =
                 num.status === 'active' || num.status === 'completed'
                   ? '#10B981'
                   : num.status === 'waiting'
                   ? '#F59E0B'
                   : '#EF4444';
+              const serviceTitle = formatServiceName(num.serviceName, num.service);
+              const countryTitle = (num.countryName || num.countryCode || 'UNITED STATES').toUpperCase();
 
               return (
                 <View
-                  key={num.id}
+                  key={numId}
                   style={[
                     s.modernNumberCard,
                     {
@@ -554,7 +609,7 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                     isHistory && { opacity: 0.85 },
                   ]}
                 >
-                  {/* Top Row: Status Dot + Service Name + Country Pill (Bounded — Never Overflows!) */}
+                  {/* Top Row: Status Dot + Service Name + Cheap Tag + Country Pill */}
                   <View style={s.mncTop}>
                     <View style={s.mncService}>
                       <View style={[s.mncDot, { backgroundColor: dotColor }]} />
@@ -563,8 +618,13 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                         numberOfLines={1}
                         ellipsizeMode="tail"
                       >
-                        {num.serviceName}
+                        {serviceTitle}
                       </Text>
+                      {num.type === 'cheap' && (
+                        <View style={[s.cheapBadgePill, { backgroundColor: colors.isDark ? '#1E293B' : '#EFF6FF' }]}>
+                          <Text style={[s.cheapBadgeText, { color: colors.primary }]}>CHEAP</Text>
+                        </View>
+                      )}
                     </View>
                     <View
                       style={[
@@ -577,16 +637,16 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                         numberOfLines={1}
                         ellipsizeMode="tail"
                       >
-                        {num.countryName || num.countryCode || 'UNITED STATES'}
+                        {countryTitle}
                       </Text>
                     </View>
                   </View>
 
-                  {/* Phone Number Row (Directly on Card — Auto-Fits Inside Container!) */}
+                  {/* Phone Number Row */}
                   <TouchableOpacity
                     style={s.mncMain}
                     onPress={() =>
-                      handleCopy(num.phoneNumber, `ph-${num.id}`, 'Phone number copied!')
+                      handleCopy(num.phoneNumber, `ph-${numId}`, 'Phone number copied!')
                     }
                     activeOpacity={0.7}
                   >
@@ -606,7 +666,7 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                   </TouchableOpacity>
 
                   {/* Countdown Timer for Active Numbers (Matches Web NumberCard.tsx!) */}
-                  {!isHistory && settings.showExpiryTimer && num.expiresAt ? (
+                  {!isHistory && num.expiresAt ? (
                     <Text style={[s.mncTimer, { color: colors.textMuted }]}>
                       Expires in{' '}
                       <Text style={s.mncTimeValue}>
@@ -624,13 +684,14 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                         nestedScrollEnabled
                         showsVerticalScrollIndicator={num.otps.length > 2}
                       >
-                        {(expandedCardIds[num.id]
+                        {(expandedCardIds[numId]
                           ? num.otps
                           : num.otps.slice(0, 3)
                         ).map((otp, idx) => {
-                          const isOtpCopied = copiedKey === `otp-${num.id}-${idx}`;
-                          const isMsgCopied = copiedKey === `msg-${num.id}-${idx}`;
-                          const clean = cleanMessage(otp.message);
+                          const isOtpCopied = copiedKey === `otp-${numId}-${idx}`;
+                          const isMsgCopied = copiedKey === `msg-${numId}-${idx}`;
+                          const clean = cleanMessage(otp.message || otp.code);
+                          const safeCode = extractOtpCode(otp.code, otp.message);
                           return (
                             <View
                               key={idx}
@@ -648,9 +709,9 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                                 style={s.mncBubbleHeader}
                                 onPress={() =>
                                   handleCopy(
-                                    otp.code,
-                                    `otp-${num.id}-${idx}`,
-                                    `Code ${otp.code} copied!`
+                                    safeCode,
+                                    `otp-${numId}-${idx}`,
+                                    `Code ${safeCode} copied!`
                                   )
                                 }
                                 activeOpacity={0.7}
@@ -660,7 +721,7 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                                   numberOfLines={1}
                                   adjustsFontSizeToFit
                                 >
-                                  {otp.code}
+                                  {safeCode}
                                 </Text>
                                 <View style={s.copyActionWrap}>
                                   {isOtpCopied ? (
@@ -672,13 +733,13 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                               </TouchableOpacity>
 
                               {/* Tap Message Text to Copy Full SMS Message (Matches Web NumberCard.tsx!) */}
-                              {settings.showSmsMessagePreview && clean ? (
+                              {settings.showSmsMessagePreview && clean && clean !== safeCode ? (
                                 <TouchableOpacity
                                   style={s.mncBubbleBody}
                                   onPress={() =>
                                     handleCopy(
                                       clean,
-                                      `msg-${num.id}-${idx}`,
+                                      `msg-${numId}-${idx}`,
                                       'Full SMS message copied!'
                                     )
                                   }
@@ -709,13 +770,13 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                             triggerHaptic('selection');
                             setExpandedCardIds((prev) => ({
                               ...prev,
-                              [num.id]: !prev[num.id],
+                              [numId]: !prev[numId],
                             }));
                           }}
                           style={s.moreMessagesToggle}
                         >
                           <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>
-                            {expandedCardIds[num.id]
+                            {expandedCardIds[numId]
                               ? 'Show latest 3 messages'
                               : `View all ${num.otps.length} messages (${num.otps.length - 3} more)`}
                           </Text>
@@ -748,7 +809,7 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                             s.outlineActionBtn,
                             { borderColor: colors.border },
                           ]}
-                          onPress={() => handleCheckOTP(num.id, num.type)}
+                          onPress={() => handleCheckOTP(numId, num.type)}
                           disabled={isBusy}
                         >
                           {isBusy ? (
@@ -763,29 +824,33 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                           )}
                         </TouchableOpacity>
 
-                        <TouchableOpacity
-                          style={s.dangerActionBtn}
-                          onPress={() => handleCancelNumber(num.id, num.type)}
-                          disabled={isBusy}
-                        >
-                          <XCircle size={15} color="#EF4444" />
-                          <Text style={s.dangerActionText}>Cancel</Text>
-                        </TouchableOpacity>
+                        {(num.status === 'active' || num.status === 'waiting') && num.type !== 'rental' && (
+                          <TouchableOpacity
+                            style={s.dangerActionBtn}
+                            onPress={() => handleCancelNumber(numId, num.type)}
+                            disabled={isBusy}
+                          >
+                            <XCircle size={15} color="#EF4444" />
+                            <Text style={s.dangerActionText}>Cancel</Text>
+                          </TouchableOpacity>
+                        )}
                       </>
                     ) : (
-                      <TouchableOpacity
-                        style={[
-                          s.outlineActionBtn,
-                          { borderColor: colors.border },
-                        ]}
-                        onPress={() => handleReuseNumber(num.id)}
-                        disabled={isBusy}
-                      >
-                        <RotateCcw size={15} color={colors.text} />
-                        <Text style={[s.outlineActionText, { color: colors.text }]}>
-                          Reuse
-                        </Text>
-                      </TouchableOpacity>
+                      num.type !== 'rental' && num.type !== 'cheap' && (
+                        <TouchableOpacity
+                          style={[
+                            s.outlineActionBtn,
+                            { borderColor: colors.border },
+                          ]}
+                          onPress={() => handleReuseNumber(numId)}
+                          disabled={isBusy}
+                        >
+                          <RotateCcw size={15} color={colors.text} />
+                          <Text style={[s.outlineActionText, { color: colors.text }]}>
+                            Reuse
+                          </Text>
+                        </TouchableOpacity>
+                      )
                     )}
                   </View>
                 </View>
@@ -908,6 +973,17 @@ const s = StyleSheet.create({
     flexShrink: 1,
     fontSize: 15,
     fontWeight: '600',
+  },
+  cheapBadgePill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 2,
+  },
+  cheapBadgeText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   mncCountryPill: {
     maxWidth: '44%',

@@ -21,6 +21,7 @@ import {
   Repeat,
   Phone,
   Globe,
+  XCircle,
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
@@ -248,6 +249,29 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
     });
   };
 
+  const handleCancelRental = (rentalId: string, phone: string) => {
+    showDialog({
+      title: 'Cancel Rental Number?',
+      message: `Are you sure you want to cancel and release ${phone}? This number will be immediately released from your account.`,
+      variant: 'danger',
+      confirmText: 'Release Number',
+      cancelText: 'Keep Rental',
+      onConfirm: async () => {
+        try {
+          const res = await apiClient.post(`/numbers/rentals/${rentalId}/cancel`);
+          if (res.data?.success) {
+            showToast('Rental released successfully', 'success');
+            await fetchActiveRentals();
+          } else {
+            showToast(res.data?.message || 'Failed to cancel rental', 'error');
+          }
+        } catch (err: any) {
+          showToast(err?.response?.data?.message || 'Failed to cancel rental', 'error');
+        }
+      },
+    });
+  };
+
   const handleSelectNavTab = (nav: NavTabId) => {
     if (nav === 'home') onNavigateToHome?.();
     else if (nav === 'buy') onNavigateToBuy?.();
@@ -416,6 +440,14 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                           ) : (
                             <Copy size={17} color={colors.textMuted} />
                           )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => handleCancelRental(rental.id, rental.phoneNumber)}
+                          style={{ padding: 4 }}
+                          hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                        >
+                          <XCircle size={17} color="#EF4444" />
                         </TouchableOpacity>
                       </View>
                     </TouchableOpacity>
