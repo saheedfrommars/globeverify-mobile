@@ -423,12 +423,24 @@ export const WalletSettingsProvider: React.FC<{
   );
 };
 
+const DEFAULT_FALLBACK_CONTEXT: AppSettingsContextType = {
+  settings: DEFAULT_APP_SETTINGS,
+  colors: Appearance.getColorScheme() === 'dark' ? DARK_WEB_COLORS : LIGHT_WEB_COLORS,
+  isLoaded: true,
+  activeScreen: 'dashboard',
+  setActiveScreen: () => {},
+  toggleTheme: async () => {},
+  updateSetting: async () => {},
+  toggleVisibleTab: async () => {},
+  resetToDefaults: async () => {},
+  triggerHaptic: () => {},
+  showDialog: () => {},
+  showToast: () => {},
+};
+
 export const useAppSettings = () => {
   const ctx = useContext(AppSettingsContext);
-  if (!ctx) {
-    throw new Error('useAppSettings must be used within a WalletSettingsProvider');
-  }
-  return ctx;
+  return ctx || DEFAULT_FALLBACK_CONTEXT;
 };
 
 export const useWalletSettings = useAppSettings;

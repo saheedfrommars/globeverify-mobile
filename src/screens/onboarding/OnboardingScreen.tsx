@@ -373,16 +373,30 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
           {/* Legal Disclaimer Footer with Interactive Links */}
           <View style={styles.footerWrap}>
             <Text style={[styles.footerText, { color: colors.footerText }]}>
-              By clicking "Create an account", you agree to all our{' '}
-              <Text style={[styles.footerLink, { color: colors.footerLink }]} onPress={() => openLegal('terms')}>
-                Terms
-              </Text>
-              {' '}and{' '}
-              <Text style={[styles.footerLink, { color: colors.footerLink }]} onPress={() => openLegal('privacy')}>
-                Privacy Policy
-              </Text>
-              .
+              By clicking "Create an account", you agree to all our
             </Text>
+            <View style={styles.footerLinksRow}>
+              <TouchableOpacity
+                onPress={() => openLegal('terms')}
+                hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.footerLink, { color: colors.footerLink }]}>
+                  Terms of Service
+                </Text>
+              </TouchableOpacity>
+              <Text style={[styles.footerText, { color: colors.footerText }]}> and </Text>
+              <TouchableOpacity
+                onPress={() => openLegal('privacy')}
+                hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.footerLink, { color: colors.footerLink }]}>
+                  Privacy Policy
+                </Text>
+              </TouchableOpacity>
+              <Text style={[styles.footerText, { color: colors.footerText }]}>.</Text>
+            </View>
           </View>
         </Animated.View>
       </View>
@@ -511,6 +525,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
   },
+  footerLinksRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+    flexWrap: 'wrap',
+  },
   footerText: {
     fontSize: 12,
     lineHeight: 18,
@@ -518,6 +539,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   footerLink: {
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '800',
     textDecorationLine: 'underline',
   },

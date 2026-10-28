@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   Pressable,
+  TouchableOpacity,
   Linking,
   Alert,
   Modal,
@@ -237,28 +238,35 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       {/* Legal Agreement / Compliance Notice */}
       <View style={styles.termsAgreementWrap}>
         <Text style={[styles.termsAgreementText, { color: colors.textSecondary }]}>
-          Protected by GlobeVerify Security. View{' '}
-          <Text
-            style={[styles.termsLink, { color: colors.primary }]}
+          Protected by GlobeVerify Security. View
+        </Text>
+        <View style={styles.termsLinksRow}>
+          <TouchableOpacity
             onPress={() => {
               Haptics.selectionAsync();
               setLegalModal({ visible: true, tab: 'terms' });
             }}
+            hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+            activeOpacity={0.7}
           >
-            Terms of Service
-          </Text>
-          {' '}&{' '}
-          <Text
-            style={[styles.termsLink, { color: colors.primary }]}
+            <Text style={[styles.termsLink, { color: colors.primary }]}>
+              Terms of Service
+            </Text>
+          </TouchableOpacity>
+          <Text style={[styles.termsAgreementText, { color: colors.textSecondary }]}> & </Text>
+          <TouchableOpacity
             onPress={() => {
               Haptics.selectionAsync();
               setLegalModal({ visible: true, tab: 'privacy' });
             }}
+            hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+            activeOpacity={0.7}
           >
-            Privacy Policy
-          </Text>
-          .
-        </Text>
+            <Text style={[styles.termsLink, { color: colors.primary }]}>
+              Privacy Policy
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* In-App Legal Terms & Privacy Modal */}
@@ -319,6 +327,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     paddingHorizontal: 8,
     alignItems: 'center',
+  },
+  termsLinksRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+    flexWrap: 'wrap',
   },
   termsAgreementText: {
     fontSize: 12,

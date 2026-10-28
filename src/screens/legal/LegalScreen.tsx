@@ -338,6 +338,13 @@ export const LegalScreen: React.FC<LegalScreenProps> = ({
 }) => {
   const { colors, triggerHaptic, setActiveScreen } = useAppSettings();
   const [activeTab, setActiveTab] = useState<'terms' | 'privacy'>(initialTab);
+
+  React.useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     acceptance: true,
     description: true,

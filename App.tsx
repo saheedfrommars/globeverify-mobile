@@ -154,6 +154,8 @@ function MainNavigator() {
     }
   }, [isAuthenticated, user]);
 
+  let content: React.ReactNode = null;
+
   // If already authenticated, show the rich app screens wrapped with global AppSettings navigation
   if (isAuthenticated && user) {
     let screenContent: React.ReactNode = null;
@@ -284,116 +286,130 @@ function MainNavigator() {
       );
     }
 
-    return (
-      <WalletSettingsProvider
-        activeScreen={activeAppScreen}
-        onNavigateScreen={(scr) => setActiveAppScreen(scr)}
-      >
-        <View style={{ flex: 1 }}>
-          {screenContent}
-          <VeraSupportChat />
-        </View>
-      </WalletSettingsProvider>
+    content = (
+      <>
+        {screenContent}
+        <VeraSupportChat />
+      </>
     );
+  } else {
+    // Auth routing
+    switch (currentStep) {
+      case 'onboarding':
+        content = (
+          <OnboardingScreen
+            onComplete={(action) => {
+              if (action === 'register') {
+                setCurrentStep('register');
+              } else {
+                setCurrentStep('login');
+              }
+            }}
+          />
+        );
+        break;
+
+      case 'login':
+        content = (
+          <LoginScreen
+            onNavigateToRegister={() => setCurrentStep('register')}
+            onNavigateToForgot={() => setCurrentStep('forgot')}
+            onNavigateToOtp={({ email, type, twoFactorMethod }) => {
+              setOtpParams({ email, type, twoFactorMethod });
+              setCurrentStep('otp');
+            }}
+            onLoginSuccess={() => setCurrentStep('dashboard')}
+            onBack={() => setCurrentStep('onboarding')}
+          />
+        );
+        break;
+
+      case 'register':
+        content = (
+          <RegisterScreen
+            onNavigateToLogin={() => setCurrentStep('login')}
+            onNavigateToOtp={({ email, type }) => {
+              setOtpParams({ email, type });
+              setCurrentStep('otp');
+            }}
+            onBack={() => setCurrentStep('onboarding')}
+          />
+        );
+        break;
+
+      case 'otp':
+        content = (
+          <OtpScreen
+            email={otpParams.email}
+            type={otpParams.type}
+            twoFactorMethod={otpParams.twoFactorMethod}
+            onSuccess={() => setCurrentStep('dashboard')}
+            onBackToLogin={() => setCurrentStep('login')}
+          />
+        );
+        break;
+
+      case 'forgot':
+        content = (
+          <ForgotPasswordScreen
+            onNavigateToReset={(email) => {
+              setResetEmail(email);
+              setCurrentStep('reset');
+            }}
+            onBackToLogin={() => setCurrentStep('login')}
+          />
+        );
+        break;
+
+      case 'reset':
+        content = (
+          <ResetPasswordScreen
+            email={resetEmail}
+            onResetSuccess={() => setCurrentStep('login')}
+            onBackToLogin={() => setCurrentStep('login')}
+          />
+        );
+        break;
+
+      case 'terms':
+      case 'privacy':
+      case 'legal':
+        content = (
+          <LegalScreen
+            isModal
+            initialTab={currentStep === 'privacy' ? 'privacy' : 'terms'}
+            onBack={() => setCurrentStep('login')}
+          />
+        );
+        break;
+
+      default:
+        content = null;
+        break;
+    }
   }
 
-  // Auth routing
-  switch (currentStep) {
-    case 'onboarding':
-      return (
-        <OnboardingScreen
-          onComplete={(action) => {
-            if (action === 'register') {
-              setCurrentStep('register');
-            } else {
-              setCurrentStep('login');
-            }
-          }}
-        />
-      );
-
-    case 'login':
-      return (
-        <LoginScreen
-          onNavigateToRegister={() => setCurrentStep('register')}
-          onNavigateToForgot={() => setCurrentStep('forgot')}
-          onNavigateToOtp={({ email, type, twoFactorMethod }) => {
-            setOtpParams({ email, type, twoFactorMethod });
-            setCurrentStep('otp');
-          }}
-          onLoginSuccess={() => setCurrentStep('dashboard')}
-          onBack={() => setCurrentStep('onboarding')}
-        />
-      );
-
-    case 'register':
-      return (
-        <RegisterScreen
-          onNavigateToLogin={() => setCurrentStep('login')}
-          onNavigateToOtp={({ email, type }) => {
-            setOtpParams({ email, type });
-            setCurrentStep('otp');
-          }}
-          onBack={() => setCurrentStep('onboarding')}
-        />
-      );
-
-    case 'otp':
-      return (
-        <OtpScreen
-          email={otpParams.email}
-          type={otpParams.type}
-          twoFactorMethod={otpParams.twoFactorMethod}
-          onSuccess={() => setCurrentStep('dashboard')}
-          onBackToLogin={() => setCurrentStep('login')}
-        />
-      );
-
-    case 'forgot':
-      return (
-        <ForgotPasswordScreen
-          onNavigateToReset={(email) => {
-            setResetEmail(email);
-            setCurrentStep('reset');
-          }}
-          onBackToLogin={() => setCurrentStep('login')}
-        />
-      );
-
-    case 'reset':
-      return (
-        <ResetPasswordScreen
-          email={resetEmail}
-          onResetSuccess={() => setCurrentStep('login')}
-          onBackToLogin={() => setCurrentStep('login')}
-        />
-      );
-
-    case 'terms':
-    case 'privacy':
-    case 'legal':
-      return (
-        <LegalScreen
-          isModal
-          initialTab={currentStep === 'privacy' ? 'privacy' : 'terms'}
-          onBack={() => setCurrentStep('login')}
-        />
-      );
-
-    default:
-      return null;
-  }
+  return (
+    <WalletSettingsProvider
+      activeScreen={activeAppScreen}
+      onNavigateScreen={(scr) => setActiveAppScreen(scr)}
+    >
+      <CallProvider>
+        <StatusBar style="auto" />
+        <View style={{ flex: 1 }}>
+          {content}
+          <CallModal />
+        </View>
+      </CallProvider>
+    </WalletSettingsProvider>
+  );
 }
 
 export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <CallProvider>
-          <StatusBar style="auto" />
-          <MainNavigator />
-          <CallModal />
-        </CallProvider>
+        <MainNavigator />
       </AuthProvider>
     </SafeAreaProvider>
   );
