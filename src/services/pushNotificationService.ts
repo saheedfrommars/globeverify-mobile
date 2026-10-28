@@ -10,16 +10,22 @@ import type { AppScreenId } from '../context/WalletSettingsContext';
 const PUSH_TOKEN_STORAGE_KEY = 'gv_expo_push_token';
 const PUSH_ENABLED_STORAGE_KEY = 'gv_push_notifications_enabled';
 
-// Set global foreground notification presentation options
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Set global foreground notification presentation options safely
+try {
+  if (Notifications && typeof Notifications.setNotificationHandler === 'function') {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+  }
+} catch (err) {
+  console.log('[PushService] setNotificationHandler skipped in current environment:', err);
+}
 
 export interface PushRegistrationResult {
   success: boolean;
@@ -31,17 +37,21 @@ export interface PushRegistrationResult {
  * Configure Android notification channels with high importance and vibration.
  */
 async function setupAndroidNotificationChannel() {
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'GlobeVerify Updates',
-      description: 'Real-time SMS OTPs, rental notifications, and deposit updates',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#2563EB',
-      sound: 'default',
-      enableVibrate: true,
-      showBadge: true,
-    });
+  if (Platform.OS === 'android' && Notifications && typeof Notifications.setNotificationChannelAsync === 'function') {
+    try {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'GlobeVerify Updates',
+        description: 'Real-time SMS OTPs, rental notifications, and deposit updates',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#2563EB',
+        sound: 'default',
+        enableVibrate: true,
+        showBadge: true,
+      });
+    } catch (err) {
+      console.log('[PushService] setupAndroidNotificationChannel notice:', err);
+    }
   }
 }
 
@@ -146,19 +156,36 @@ export async function isPushNotificationEnabledAsync(): Promise<boolean> {
 export function setupNotificationResponseListener(
   onNavigateScreen: (screen: AppScreenId) => void
 ) {
-  // Check if the app was launched by tapping a push notification
-  Notifications.getLastNotificationResponseAsync().then((response) => {
-    if (response) {
-      handleNotificationPayload(response.notification, onNavigateScreen);
+  try {
+    if (!Notifications || typeof Notifications.addNotificationResponseReceivedListener !== 'function') {
+      return () => {};
     }
-  });
 
-  // Listen for taps while the app is running in foreground or background
-  const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-    handleNotificationPayload(response.notification, onNavigateScreen);
-  });
+    // Check if the app was launched by tapping a push notification
+    if (typeof Notifications.getLastNotificationResponseAsync === 'function') {
+      Notifications.getLastNotificationResponseAsync()
+        .then((response) => {
+          if (response) {
+            handleNotificationPayload(response.notification, onNavigateScreen);
+          }
+        })
+        .catch(() => {});
+    }
 
-  return () => subscription.remove();
+    // Listen for taps while the app is running in foreground or background
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      handleNotificationPayload(response.notification, onNavigateScreen);
+    });
+
+    return () => {
+      try {
+        subscription.remove();
+      } catch {}
+    };
+  } catch (err) {
+    console.log('[PushService] setupNotificationResponseListener skipped:', err);
+    return () => {};
+  }
 }
 
 function handleNotificationPayload(
