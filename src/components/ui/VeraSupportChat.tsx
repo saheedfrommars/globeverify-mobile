@@ -262,13 +262,15 @@ export const VeraSupportChat: React.FC = () => {
   const connect = useCallback(async () => {
     if (socketRef.current?.connected) return;
 
-    const token = await SecureStore.getItemAsync('accessToken');
+    const token =
+      (await SecureStore.getItemAsync('gv_auth_token')) ||
+      (await SecureStore.getItemAsync('accessToken'));
     if (!token) return;
 
     const backendUrl = socketService.getBackendUrl();
     const socket = io(`${backendUrl}/support`, {
       auth: { token },
-      transports: ['polling', 'websocket'],
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 5,
       timeout: 10000,

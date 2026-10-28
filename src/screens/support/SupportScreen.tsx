@@ -115,12 +115,14 @@ export const SupportScreen: React.FC<SupportScreenProps> = ({
         let sock: Socket | null = null;
 
         const connectSupportSocket = async () => {
-            const token = await SecureStore.getItemAsync('accessToken');
+            const token =
+                (await SecureStore.getItemAsync('gv_auth_token')) ||
+                (await SecureStore.getItemAsync('accessToken'));
             if (!token || !mounted) return;
 
             sock = io(`${socketService.getBackendUrl()}/support`, {
                 auth: { token },
-                transports: ['polling', 'websocket'],
+                transports: ['websocket', 'polling'],
                 reconnection: true,
                 reconnectionDelay: 2000,
             });

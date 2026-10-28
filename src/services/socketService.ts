@@ -12,7 +12,9 @@ export type SupportedSocketEvent =
   | 'call_ended'
   | 'call_transcription_update'
   | 'chat_message_received'
-  | 'balance_updated';
+  | 'balance_updated'
+  | 'telegram_linked'
+  | 'telegram_unlinked';
 
 class RealtimeSocketService {
   private socket: Socket | null = null;
@@ -23,6 +25,14 @@ class RealtimeSocketService {
   public getBackendUrl(): string {
     const base = apiClient.defaults.baseURL || 'https://api.globeverify.com/api';
     return base.replace(/\/api\/?$/, '');
+  }
+
+  public isConnected(): boolean {
+    return !!(this.socket && this.socket.connected);
+  }
+
+  public getSocket(): Socket | null {
+    return this.socket;
   }
 
   public connect(userId?: string, token?: string | null) {
@@ -41,11 +51,15 @@ class RealtimeSocketService {
     }
 
     const backendUrl = this.getBackendUrl();
+    console.log(`[Socket] Initializing connection to ${backendUrl} for user: ${userId}`);
+
+    // In React Native / mobile, native WebSockets connect faster and bypass XHR polling CORS issues
     this.socket = io(backendUrl, {
-      transports: ['polling', 'websocket'],
+      transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 8,
-      reconnectionDelay: 2000,
+      reconnectionAttempts: 15,
+      reconnectionDelay: 1500,
+      timeout: 10000,
       auth: {
         token: this.currentToken,
       },
@@ -55,6 +69,22 @@ class RealtimeSocketService {
     });
 
     this.socket.on('connect', () => {
+      console.log(`[Socket] Successfully connected! ID: ${this.socket?.id}`);
+      if (this.currentUserId && this.socket) {
+        this.socket.emit('identify', this.currentUserId);
+      }
+    });
+
+    this.socket.on('connect_error', (err: any) => {
+      console.warn(`[Socket] Connection error: ${err?.message || err}`);
+    });
+
+    this.socket.on('disconnect', (reason: string) => {
+      console.log(`[Socket] Disconnected: ${reason}`);
+    });
+
+    this.socket.io.on('reconnect', (attempt: number) => {
+      console.log(`[Socket] Reconnected after ${attempt} attempts`);
       if (this.currentUserId && this.socket) {
         this.socket.emit('identify', this.currentUserId);
       }
@@ -70,16 +100,21 @@ class RealtimeSocketService {
       'call_transcription_update',
       'chat_message_received',
       'balance_updated',
+      'telegram_linked',
+      'telegram_unlinked',
     ];
 
     events.forEach((evt) => {
       this.socket?.on(evt, (payload: any) => {
+        console.log(`[Socket] Received event: ${evt}`, payload);
         const set = this.listeners.get(evt);
         if (set) {
           set.forEach((cb) => {
             try {
               cb(payload);
-            } catch {}
+            } catch (err) {
+              console.warn(`[Socket] Listener error on ${evt}:`, err);
+            }
           });
         }
       });
