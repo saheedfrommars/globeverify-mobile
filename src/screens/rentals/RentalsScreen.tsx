@@ -1067,13 +1067,6 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
     else if (nav === 'wallet') onNavigateToWallet?.();
   };
 
-  // Find any active VoIP rental to provide immediate dialpad access
-  const primaryVoipRental = useMemo(() => {
-    return activeRentals.find(
-      (r) => r.provider === 'telnyx' || r.lineType === 'voip'
-    );
-  }, [activeRentals]);
-
   // ─── TWO-STEP MESSAGING NAVIGATION ────────────────────────────────────────
   // Step 2: Conversation View
   if (activeRentalForMessages && (activeChatRecipient || isComposingNew)) {
@@ -1131,28 +1124,12 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
           />
         }
       >
-        {/* ── PAGE HEADER & TABS + DIALPAD SHORTCUT ───────────────────────── */}
+        {/* ── PAGE HEADER & TABS ────────────────────────────────────────── */}
         <View style={[s.headerBar, { borderBottomColor: colors.border }]}>
           <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={[s.pageTitle, { color: colors.text }]}>
-                Rental Numbers
-              </Text>
-              {/* Dialpad button directly accessible whenever user has a VoIP line */}
-              {primaryVoipRental && (
-                <TouchableOpacity
-                  style={[s.headerDialpadBtn, { backgroundColor: colors.primary }]}
-                  onPress={() => {
-                    triggerHaptic('medium');
-                    openDialpad(primaryVoipRental.id, primaryVoipRental.phoneNumber);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Phone size={13} color="#FFFFFF" />
-                  <Text style={s.headerDialpadBtnText}>Dialpad</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            <Text style={[s.pageTitle, { color: colors.text }]}>
+              Rental Numbers
+            </Text>
             <Text style={[s.pageSubtitle, { color: colors.textMuted }]}>
               Dedicated 30-day lines for SMS & voice calls
             </Text>
@@ -1823,19 +1800,6 @@ const s = StyleSheet.create({
   pageSubtitle: {
     fontSize: 13,
     marginTop: 2,
-  },
-  headerDialpadBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  headerDialpadBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
   },
   tabsRow: {
     flexDirection: 'row',
