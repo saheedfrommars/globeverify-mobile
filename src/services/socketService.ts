@@ -57,8 +57,8 @@ class RealtimeSocketService {
     this.socket = io(backendUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 15,
-      reconnectionDelay: 1500,
+      reconnectionAttempts: 1,
+      reconnectionDelay: 10000,
       timeout: 10000,
       auth: {
         token: this.currentToken,

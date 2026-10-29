@@ -1,3 +1,5 @@
+import { WebView } from 'react-native-webview';
+const HeadlessWebView = WebView as any;
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -66,6 +68,16 @@ export const CallModal: React.FC = () => {
   const { colors } = useAppSettings();
   const isDark = colors.isDark;
 
+  // Hidden WebRTC audio engine ref & URL
+  const engineWebViewRef = useRef<any>(null);
+  const [engineUrl, setEngineUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (callState === 'idle') {
+      setEngineUrl(null);
+    }
+  }, [callState]);
+
   // Dialpad state
   const [dialedNumber, setDialedNumber] = useState('');
 
@@ -111,18 +123,62 @@ export const CallModal: React.FC = () => {
     setDialedNumber((prev) => prev.slice(0, -1));
   };
 
-  const handleStartCall = () => {
+  const handleStartCall = async () => {
     if (!dialedNumber.trim() || !dialpadRentalId) return;
     let num = dialedNumber.trim();
     if (!num.startsWith('+')) {
       num = '+' + num;
     }
-    startOutboundCall(
-      dialpadRentalId,
-      dialpadFromNumber || 'Leased Number',
-      num
-    );
+    const rentalId = dialpadRentalId;
+    const fromNum = dialpadFromNumber || 'Leased Number';
+
+    startOutboundCall(rentalId, fromNum, num);
+
+    // Spin up headless WebRTC audio engine in background WebView
+    try {
+      const res = await apiClient.get(`/numbers/rentals/${rentalId}/voice-token`);
+      const token = res.data?.token || '';
+      if (token) {
+        const url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(fromNum)}&rentalId=${rentalId}&to=${encodeURIComponent(num)}&mode=engine`;
+        setEngineUrl(url);
+      }
+    } catch (e: any) {
+      console.warn('[CallModal] Voice token error:', e?.message);
+    }
+
     setDialedNumber('');
+  };
+
+  const handleAnswerCall = async () => {
+    answerCall();
+    const rentalId = currentCall?.rentalId;
+    if (rentalId) {
+      try {
+        const res = await apiClient.get(`/numbers/rentals/${rentalId}/voice-token`);
+        const token = res.data?.token || '';
+        if (token) {
+          const url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(currentCall?.phoneNumber || '')}&rentalId=${rentalId}&mode=engine`;
+          setEngineUrl(url);
+        }
+      } catch (e: any) {
+        console.warn('[CallModal] Answer engine token error:', e?.message);
+      }
+    }
+  };
+
+  const handleHangup = () => {
+    if (engineWebViewRef.current) {
+      engineWebViewRef.current.injectJavaScript('if (window.callEngineHangup) { window.callEngineHangup(); } true;');
+    }
+    setEngineUrl(null);
+    hangupCall();
+  };
+
+  const handleToggleMute = () => {
+    toggleMute();
+    if (engineWebViewRef.current) {
+      engineWebViewRef.current.injectJavaScript(`if (window.callEngineMute) { window.callEngineMute(${!isMuted}); } true;`);
+    }
   };
 
   const isModalVisible = callState !== 'idle' || isDialpadOpen;
@@ -262,7 +318,7 @@ export const CallModal: React.FC = () => {
 
             <View style={s.actionCol}>
               <TouchableOpacity
-                onPress={answerCall}
+                onPress={handleAnswerCall}
                 style={[s.circleBtn, { backgroundColor: '#10B981' }]}
                 activeOpacity={0.8}
               >
@@ -315,7 +371,7 @@ export const CallModal: React.FC = () => {
         <View style={s.controlsRow}>
           <TouchableOpacity
             style={[s.ctrlCircle, isMuted && s.ctrlCircleActive]}
-            onPress={toggleMute}
+            onPress={handleToggleMute}
           >
             {isMuted ? <MicOff size={24} color="#EF4444" /> : <Mic size={24} color="#FFFFFF" />}
             <Text style={s.ctrlLabel}>{isMuted ? 'Muted' : 'Mute'}</Text>
@@ -337,7 +393,7 @@ export const CallModal: React.FC = () => {
         {/* Bottom Hangup Button */}
         <View style={s.hangupArea}>
           <TouchableOpacity
-            onPress={hangupCall}
+            onPress={handleHangup}
             style={[s.circleBtn, { backgroundColor: '#EF4444' }]}
             activeOpacity={0.8}
           >
@@ -345,6 +401,31 @@ export const CallModal: React.FC = () => {
           </TouchableOpacity>
           <Text style={s.actionBtnLabel}>End Call</Text>
         </View>
+
+        {/* Headless WebRTC Audio Engine (No UI, full 2-way microphone & speaker streaming) */}
+        {engineUrl && (
+          <WebView
+            ref={engineWebViewRef}
+            source={{ uri: engineUrl }}
+            style={{ width: 0, height: 0, opacity: 0, position: 'absolute' }}
+            javaScriptEnabled
+            domStorageEnabled
+            mediaPlaybackRequiresUserAction={false}
+            allowsInlineMediaPlayback
+            originWhitelist={['*']}
+            onPermissionRequest={(event: any) => {
+              event.request.grant(event.request.getResources());
+            }}
+            onMessage={(e: any) => {
+              try {
+                const msg = JSON.parse(e.nativeEvent.data);
+                if (msg.type === 'call_state' && msg.state === 'destroy') {
+                  handleHangup();
+                }
+              } catch (err) {}
+            }}
+          />
+        )}
       </SafeAreaView>
     </Modal>
   );
