@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,14 +9,15 @@ import {
   Dimensions,
   TouchableOpacity,
   Image,
+  useColorScheme,
+  Appearance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Path, Ellipse, G, Defs, LinearGradient, Stop } from 'react-native-svg';
-import { ArrowLeft, Shield, Moon, Sun } from 'lucide-react-native';
+import { ArrowLeft, Shield } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../theme';
-import { useAppSettings } from '../../context/WalletSettingsContext';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -34,8 +35,25 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
   onBack,
 }) => {
   const { spacing, typography } = useTheme();
-  const { settings, toggleTheme } = useAppSettings();
-  const isDark = settings.themeMode === 'dark';
+  const systemScheme = useColorScheme();
+  const [activeScheme, setActiveScheme] = useState(
+    systemScheme || Appearance.getColorScheme() || 'light'
+  );
+
+  useEffect(() => {
+    const current = systemScheme || Appearance.getColorScheme();
+    if (current) {
+      setActiveScheme(current);
+    }
+    const sub = Appearance.addChangeListener(({ colorScheme }) => {
+      if (colorScheme) {
+        setActiveScheme(colorScheme);
+      }
+    });
+    return () => sub.remove();
+  }, [systemScheme]);
+
+  const isDark = activeScheme === 'dark';
   const insets = useSafeAreaInsets();
 
   const handleBack = () => {
@@ -143,25 +161,7 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
               />
             </View>
 
-            {/* Top-Right Theme Toggle Button */}
-            <TouchableOpacity
-              onPress={toggleTheme}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              style={[
-                styles.themeBtn,
-                {
-                  backgroundColor: themeColors.surface,
-                  borderColor: themeColors.border,
-                },
-              ]}
-              activeOpacity={0.7}
-            >
-              {isDark ? (
-                <Sun size={17} color="#FBBF24" />
-              ) : (
-                <Moon size={17} color={themeColors.text} />
-              )}
-            </TouchableOpacity>
+            <View style={{ width: 40 }} />
           </View>
 
           {/* ── Header Title & Subtitle ── */}

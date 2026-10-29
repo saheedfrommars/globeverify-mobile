@@ -20,6 +20,7 @@
     },
     "android": {
       "package": "com.globeverify.app",
+      "userInterfaceStyle": "automatic",
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.RECORD_AUDIO",

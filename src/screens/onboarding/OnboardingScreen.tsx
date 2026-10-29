@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Animated,
   useColorScheme,
+  Appearance,
   Image,
   Modal,
   Easing,
@@ -15,9 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import Svg, { Path, Ellipse, G, Defs, LinearGradient, Stop } from 'react-native-svg';
-import { Moon, Sun } from 'lucide-react-native';
 import { LegalScreen } from '../legal/LegalScreen';
-import { useAppSettings } from '../../context/WalletSettingsContext';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -38,8 +37,25 @@ export interface OnboardingScreenProps {
 }
 
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
-  const { settings, toggleTheme } = useAppSettings();
-  const isDark = settings.themeMode === 'dark';
+  const systemScheme = useColorScheme();
+  const [activeScheme, setActiveScheme] = useState(
+    systemScheme || Appearance.getColorScheme() || 'light'
+  );
+
+  useEffect(() => {
+    const current = systemScheme || Appearance.getColorScheme();
+    if (current) {
+      setActiveScheme(current);
+    }
+    const sub = Appearance.addChangeListener(({ colorScheme }) => {
+      if (colorScheme) {
+        setActiveScheme(colorScheme);
+      }
+    });
+    return () => sub.remove();
+  }, [systemScheme]);
+
+  const isDark = activeScheme === 'dark';
   const insets = useSafeAreaInsets();
 
   const finalTop = Math.max(insets.top, 24) + 6;
@@ -441,28 +457,6 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
           onBack={() => setLegalModal((prev) => ({ ...prev, visible: false }))}
         />
       </Modal>
-
-      {/* ── Top-Right Theme Toggle Button (Light/Dark Mode) ── */}
-      <TouchableOpacity
-        style={[
-          styles.themeToggleBtn,
-          {
-            top: finalTop + 6,
-            right: FINAL_LEFT,
-            backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.05)',
-            borderColor: isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.10)',
-          },
-        ]}
-        onPress={toggleTheme}
-        activeOpacity={0.7}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      >
-        {isDark ? (
-          <Sun size={18} color="#FBBF24" />
-        ) : (
-          <Moon size={18} color="#0F172A" />
-        )}
-      </TouchableOpacity>
     </View>
   );
 };
@@ -470,16 +464,6 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-  },
-  themeToggleBtn: {
-    position: 'absolute',
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
   },
   container: {
     flex: 1,

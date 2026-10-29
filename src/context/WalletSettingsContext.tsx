@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import type { ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
-import { Appearance } from 'react-native';
+import { Appearance, useColorScheme } from 'react-native';
 import {
   CustomDialogModal,
   type DialogConfig,
@@ -29,7 +29,7 @@ export type AppScreenId =
   | 'terms'
   | 'privacy';
 
-export type ThemeMode = 'light' | 'dark';
+export type ThemeMode = 'system' | 'light' | 'dark';
 
 export type NavigationStyle =
   | 'floating-pill'   // Default: Clean floating bottom pill dock
@@ -190,7 +190,7 @@ export interface AppDisplaySettings {
 // ─── Sensible Clean Defaults ─────────────────────────────────────────────────
 
 export const DEFAULT_APP_SETTINGS: AppDisplaySettings = {
-  themeMode: Appearance.getColorScheme() === 'dark' ? 'dark' : 'light', // follow phone theme by default
+  themeMode: 'system', // Automatically follows phone dark / light theme by default
   navigationStyle: 'floating-pill',
   showHamburgerMenu: false, // Hamburger hidden by default; user can enable in Settings
   defaultStartScreen: 'dashboard',
@@ -327,7 +327,13 @@ export const WalletSettingsProvider: React.FC<{
   const toggleTheme = useCallback(async () => {
     triggerHaptic('selection');
     setSettings((prev) => {
-      const nextMode: ThemeMode = prev.themeMode === 'light' ? 'dark' : 'light';
+      const currentActive =
+        prev.themeMode === 'system' || !prev.themeMode
+          ? Appearance.getColorScheme() === 'dark'
+            ? 'dark'
+            : 'light'
+          : prev.themeMode;
+      const nextMode: ThemeMode = currentActive === 'light' ? 'dark' : 'light';
       const next = { ...prev, themeMode: nextMode };
       persist(next);
       return next;
@@ -388,9 +394,34 @@ export const WalletSettingsProvider: React.FC<{
     []
   );
 
+  const systemScheme = useColorScheme();
+  const [currentSystemScheme, setCurrentSystemScheme] = useState<'light' | 'dark'>(
+    (systemScheme === 'dark' || Appearance.getColorScheme() === 'dark') ? 'dark' : 'light'
+  );
+
+  useEffect(() => {
+    const active = systemScheme || Appearance.getColorScheme();
+    if (active === 'dark' || active === 'light') {
+      setCurrentSystemScheme(active);
+    }
+    const sub = Appearance.addChangeListener(({ colorScheme }) => {
+      if (colorScheme === 'dark' || colorScheme === 'light') {
+        setCurrentSystemScheme(colorScheme);
+      }
+    });
+    return () => sub.remove();
+  }, [systemScheme]);
+
+  const effectiveTheme = useMemo<'light' | 'dark'>(() => {
+    if (settings.themeMode === 'system' || !settings.themeMode) {
+      return currentSystemScheme;
+    }
+    return settings.themeMode;
+  }, [settings.themeMode, currentSystemScheme]);
+
   const colors = useMemo(
-    () => (settings.themeMode === 'dark' ? DARK_WEB_COLORS : LIGHT_WEB_COLORS),
-    [settings.themeMode]
+    () => (effectiveTheme === 'dark' ? DARK_WEB_COLORS : LIGHT_WEB_COLORS),
+    [effectiveTheme]
   );
 
   return (
