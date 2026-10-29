@@ -107,7 +107,9 @@
         {
           "icon": "./assets/icon.png",
           "color": "#2563EB",
-          "sounds": []
+          "sounds": [
+            "./assets/sounds/ringtone.wav"
+          ]
         }
       ],
       "expo-font"

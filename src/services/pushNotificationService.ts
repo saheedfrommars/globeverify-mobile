@@ -59,10 +59,63 @@ export const triggerIncomingCallEvent = (callData: any) => {
   });
 };
 
+export const CALL_CATEGORY_ID = 'incoming_call';
+export const ACTION_ANSWER_CALL = 'ACTION_ANSWER_CALL';
+export const ACTION_DECLINE_CALL = 'ACTION_DECLINE_CALL';
+
+/**
+ * Configure interactive notification action buttons (Answer & Decline) for incoming voice calls.
+ */
+export async function setupCallNotificationCategory() {
+  if (Notifications && typeof Notifications.setNotificationCategoryAsync === 'function') {
+    try {
+      await Notifications.setNotificationCategoryAsync(CALL_CATEGORY_ID, [
+        {
+          identifier: ACTION_ANSWER_CALL,
+          buttonTitle: '🟢 Answer Call',
+          options: {
+            opensAppToForeground: true,
+          },
+        },
+        {
+          identifier: ACTION_DECLINE_CALL,
+          buttonTitle: '🔴 Decline',
+          options: {
+            opensAppToForeground: false,
+            isDestructive: true,
+          },
+        },
+      ]);
+    } catch (err) {
+      console.warn('[PushService] setupCallNotificationCategory notice:', err);
+    }
+  }
+}
+
+/**
+ * Reject call directly from background if user taps Decline action button.
+ */
+export async function rejectIncomingCallFromBackground(data: any) {
+  const rentalId = data?.rentalId;
+  const callControlId = data?.callControlId;
+  if (rentalId && callControlId) {
+    try {
+      await apiClient.post(`/numbers/rentals/${rentalId}/call-action`, {
+        action: 'reject',
+        callControlId,
+      });
+    } catch (err) {
+      console.warn('[PushService] Background reject error:', err);
+    }
+  }
+}
+
 /**
  * Configure Android notification channels with high importance and vibration.
  */
 export async function setupAndroidNotificationChannel() {
+  await setupCallNotificationCategory();
+
   if (Platform.OS === 'android' && Notifications && typeof Notifications.setNotificationChannelAsync === 'function') {
     try {
       // 1. General notifications (OTPs, balance updates)
@@ -78,13 +131,18 @@ export async function setupAndroidNotificationChannel() {
       });
 
       // 2. High-priority incoming phone calls channel (Ringing sound + vibrating pattern)
-      await Notifications.setNotificationChannelAsync('incoming-calls', {
+      // Delete old channel if exists to ensure sound and priority update on Android
+      if (typeof Notifications.deleteNotificationChannelAsync === 'function') {
+        await Notifications.deleteNotificationChannelAsync('incoming-calls').catch(() => {});
+      }
+
+      await Notifications.setNotificationChannelAsync('incoming-calls-v2', {
         name: 'Incoming Phone Calls',
         description: 'Ringing incoming voice calls on your leased numbers',
         importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 1000, 500, 1000, 500, 1000],
+        vibrationPattern: [0, 1000, 800, 1000, 800, 1000, 800, 1000],
         lightColor: '#2563EB',
-        sound: 'default',
+        sound: 'ringtone',
         enableVibrate: true,
         showBadge: true,
         bypassDnd: true,
@@ -207,6 +265,20 @@ export function setupNotificationResponseListener(
       Notifications.getLastNotificationResponseAsync()
         .then((response) => {
           if (response) {
+            const data = response.notification.request.content.data || {};
+            if (data.type === 'incoming_call') {
+              const actionId = response.actionIdentifier;
+              if (actionId === ACTION_DECLINE_CALL) {
+                rejectIncomingCallFromBackground(data);
+                return;
+              }
+              const autoAnswer = actionId === ACTION_ANSWER_CALL;
+              triggerIncomingCallEvent({
+                ...data,
+                autoAnswer,
+              });
+              return;
+            }
             handleNotificationPayload(response.notification, onNavigateScreen);
           }
         })
@@ -225,6 +297,26 @@ export function setupNotificationResponseListener(
 
     // Listen for taps while the app is running in foreground or background
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const actionId = response.actionIdentifier;
+      const data = response.notification.request.content.data || {};
+
+      if (data.type === 'incoming_call') {
+        if (actionId === ACTION_DECLINE_CALL) {
+          rejectIncomingCallFromBackground(data);
+          if (response.notification.request?.identifier && typeof Notifications.dismissNotificationAsync === 'function') {
+            Notifications.dismissNotificationAsync(response.notification.request.identifier).catch(() => {});
+          }
+          return;
+        }
+
+        const autoAnswer = actionId === ACTION_ANSWER_CALL;
+        triggerIncomingCallEvent({
+          ...data,
+          autoAnswer,
+        });
+        return;
+      }
+
       handleNotificationPayload(response.notification, onNavigateScreen);
     });
 

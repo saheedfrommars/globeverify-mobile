@@ -185,8 +185,25 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setCurrentCall(newCall);
       setCallState('ringing_inbound');
       startRingVibration();
+
+      // If user tapped "🟢 Answer Call" directly on the background push notification
+      if (data.autoAnswer && newCall.rentalId && newCall.callControlId) {
+        setTimeout(async () => {
+          try {
+            await apiClient.post(`/numbers/rentals/${newCall.rentalId}/call-action`, {
+              action: 'answer',
+              callControlId: newCall.callControlId,
+            });
+            stopRingVibration();
+            setCallState('connected');
+            startDurationTimer();
+          } catch (e) {
+            console.warn('[CallContext] Auto-answer error:', e);
+          }
+        }, 400);
+      }
     },
-    [startRingVibration]
+    [startDurationTimer, startRingVibration, stopRingVibration]
   );
 
   // Subscribe to real-time telephony events
