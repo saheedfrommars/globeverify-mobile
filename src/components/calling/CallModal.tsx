@@ -25,8 +25,9 @@ import {
   VolumeX,
   Delete,
   X,
-  ShieldCheck,
   User,
+  Grid3x3,
+  Shield,
 } from 'lucide-react-native';
 import { useCall } from '../../context/CallContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
@@ -72,9 +73,13 @@ export const CallModal: React.FC = () => {
   const engineWebViewRef = useRef<any>(null);
   const [engineUrl, setEngineUrl] = useState<string | null>(null);
 
+  // In-call keypad toggle state (for DTMF tones)
+  const [showInCallKeypad, setShowInCallKeypad] = useState(false);
+
   useEffect(() => {
     if (callState === 'idle') {
       setEngineUrl(null);
+      setShowInCallKeypad(false);
     }
   }, [callState]);
 
@@ -89,14 +94,14 @@ export const CallModal: React.FC = () => {
       const anim = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
-            toValue: 1.15,
-            duration: 800,
+            toValue: 1.18,
+            duration: 850,
             easing: Easing.out(Easing.ease),
             useNativeDriver: true,
           }),
           Animated.timing(pulseAnim, {
             toValue: 1,
-            duration: 800,
+            duration: 850,
             easing: Easing.in(Easing.ease),
             useNativeDriver: true,
           }),
@@ -125,6 +130,13 @@ export const CallModal: React.FC = () => {
     setDialedNumber((prev) => prev.slice(0, -1));
   };
 
+  const handleDtmfPress = (digit: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    if (engineWebViewRef.current) {
+      engineWebViewRef.current.injectJavaScript(`if (window.callEngineDTMF) { window.callEngineDTMF('${digit}'); } true;`);
+    }
+  };
+
   const handleStartCall = async () => {
     if (!dialedNumber.trim() || !dialpadRentalId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -137,7 +149,7 @@ export const CallModal: React.FC = () => {
 
     startOutboundCall(rentalId, fromNum, num);
 
-    // Spin up headless WebRTC audio engine in background WebView
+    // Spin up headless WebRTC audio engine in completely hidden background WebView
     try {
       const res = await apiClient.get(`/numbers/rentals/${rentalId}/voice-token`);
       const token = res.data?.token || '';
@@ -181,6 +193,7 @@ export const CallModal: React.FC = () => {
       engineWebViewRef.current.injectJavaScript('if (window.callEngineHangup) { window.callEngineHangup(); } true;');
     }
     setEngineUrl(null);
+    setShowInCallKeypad(false);
     hangupCall();
   };
 
@@ -201,7 +214,7 @@ export const CallModal: React.FC = () => {
 
   if (!isModalVisible) return null;
 
-  // ── 1. DIALPAD MODAL ──────────────────────────────────────────────────────
+  // ── 1. DIALPAD BOTTOM SHEET ───────────────────────────────────────────────
   if (isDialpadOpen && callState === 'idle') {
     return (
       <Modal
@@ -210,42 +223,38 @@ export const CallModal: React.FC = () => {
         transparent
         onRequestClose={closeDialpad}
       >
-        <View style={[s.modalOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.75)' : 'rgba(15,23,42,0.45)' }]}>
+        <View style={[s.modalOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.72)' : 'rgba(15,23,42,0.45)' }]}>
           <SafeAreaView
             edges={['bottom']}
             style={[
-              s.modalCard,
+              s.dialpadSheet,
               {
                 backgroundColor: colors.surface,
-                borderColor: colors.border,
               },
             ]}
           >
-            {/* Handle Bar */}
+            {/* Minimal Drag Indicator */}
             <View style={[s.handleBar, { backgroundColor: colors.border }]} />
 
-            {/* Header */}
-            <View style={s.dialpadHeader}>
-              <View style={s.dialpadHeaderLeft}>
-                <Text style={[s.dialpadTitle, { color: colors.text }]}>Make a Call</Text>
-                <View style={[s.lineBadge, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
-                  <ShieldCheck size={12} color={colors.primary} />
-                  <Text style={[s.lineBadgeText, { color: colors.textSecondary }]}>
-                    From: <Text style={{ fontWeight: '700', color: colors.primary }}>{dialpadFromNumber || 'Leased Number'}</Text>
-                  </Text>
-                </View>
+            {/* Header: Title + Subtitle & Close */}
+            <View style={s.sheetHeader}>
+              <View>
+                <Text style={[s.sheetTitle, { color: colors.text }]}>Keypad</Text>
+                <Text style={[s.sheetSubtitle, { color: colors.textMuted }]}>
+                  Calling as {dialpadFromNumber || 'Leased Number'}
+                </Text>
               </View>
               <TouchableOpacity
                 onPress={closeDialpad}
-                style={[s.closeBtn, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
+                style={[s.sheetCloseBtn, { backgroundColor: colors.surfaceSecondary }]}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <X size={18} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
-            {/* Dialed Number Display Area */}
-            <View style={[s.numberDisplayArea, { borderBottomColor: colors.border }]}>
+            {/* Large Floating Number Display */}
+            <View style={s.numberDisplayRow}>
               <Text
                 style={[
                   s.numberText,
@@ -254,42 +263,41 @@ export const CallModal: React.FC = () => {
                 numberOfLines={1}
                 adjustsFontSizeToFit
               >
-                {dialedNumber || 'Enter phone number'}
+                {dialedNumber || 'Enter number'}
               </Text>
               {dialedNumber.length > 0 && (
                 <TouchableOpacity
                   onPress={handleBackspace}
                   style={[s.backspaceBtn, { backgroundColor: colors.surfaceSecondary }]}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   <Delete size={20} color={colors.textSecondary} />
                 </TouchableOpacity>
               )}
             </View>
 
-            {/* 3x4 Dialpad Grid */}
-            <View style={s.dialpadGrid}>
+            {/* 3x4 Clean Circular Dialpad Keys */}
+            <View style={s.keysGrid}>
               {DIALPAD_KEYS.map((k) => (
                 <TouchableOpacity
                   key={k.digit}
                   style={[
-                    s.dialKey,
+                    s.circularKey,
                     {
                       backgroundColor: colors.surfaceSecondary,
-                      borderColor: colors.border,
                     },
                   ]}
                   onPress={() => handleKeyPress(k.digit)}
-                  activeOpacity={0.65}
+                  activeOpacity={0.6}
                 >
-                  <Text style={[s.dialDigit, { color: colors.text }]}>{k.digit}</Text>
-                  {k.sub ? <Text style={[s.dialSub, { color: colors.textMuted }]}>{k.sub}</Text> : null}
+                  <Text style={[s.keyDigit, { color: colors.text }]}>{k.digit}</Text>
+                  {k.sub ? <Text style={[s.keySub, { color: colors.textMuted }]}>{k.sub}</Text> : null}
                 </TouchableOpacity>
               ))}
             </View>
 
-            {/* Call Action Button */}
-            <View style={s.dialActionArea}>
+            {/* Bottom Call Button */}
+            <View style={s.callActionArea}>
               <TouchableOpacity
                 style={[
                   s.callBtn,
@@ -301,7 +309,7 @@ export const CallModal: React.FC = () => {
                 onPress={handleStartCall}
                 activeOpacity={0.8}
               >
-                <Phone size={26} color="#FFFFFF" />
+                <Phone size={28} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </SafeAreaView>
@@ -317,19 +325,11 @@ export const CallModal: React.FC = () => {
         <SafeAreaView style={[s.fullScreenCall, { backgroundColor: colors.bg }]}>
           <StatusBar style={isDark ? 'light' : 'dark'} />
 
-          {/* Top Encrypted Security Tag */}
-          <View
-            style={[
-              s.secureBadge,
-              {
-                backgroundColor: colors.surfaceSecondary,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <ShieldCheck size={14} color="#10B981" />
-            <Text style={[s.secureBadgeText, { color: colors.textSecondary }]}>
-              Encrypted VoIP Line
+          {/* Minimalist Top Tag */}
+          <View style={s.topBar}>
+            <Shield size={12} color={colors.textMuted} />
+            <Text style={[s.topBarText, { color: colors.textMuted }]}>
+              GLOBEVERIFY ENCRYPTED CALL
             </Text>
           </View>
 
@@ -349,16 +349,15 @@ export const CallModal: React.FC = () => {
                 style={[
                   s.avatarCircle,
                   {
-                    backgroundColor: colors.surfaceSecondary,
-                    borderColor: colors.border,
+                    backgroundColor: isDark ? 'rgba(16, 185, 129, 0.14)' : '#ECFDF5',
                   },
                 ]}
               >
-                <PhoneIncoming size={38} color="#10B981" />
+                <PhoneIncoming size={42} color="#10B981" />
               </View>
             </View>
 
-            <Text style={s.callStateLabel}>Incoming Call</Text>
+            <Text style={s.callStateLabel}>Incoming Call...</Text>
 
             <Text
               style={[s.remoteNumberText, { color: colors.text }]}
@@ -368,22 +367,9 @@ export const CallModal: React.FC = () => {
               {currentCall?.remoteNumber || 'Unknown Caller'}
             </Text>
 
-            <View
-              style={[
-                s.lineSubPill,
-                {
-                  backgroundColor: colors.surfaceSecondary,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <Text style={[s.myNumberSubtitle, { color: colors.textMuted }]}>
-                Line:{' '}
-                <Text style={{ fontWeight: '600', color: colors.textSecondary }}>
-                  {currentCall?.phoneNumber || 'Private Rental'}
-                </Text>
-              </Text>
-            </View>
+            <Text style={[s.myNumberSubtitle, { color: colors.textMuted }]}>
+              To your line {currentCall?.phoneNumber || 'Private Rental'}
+            </Text>
           </View>
 
           {/* Action Buttons: Decline & Answer */}
@@ -391,10 +377,10 @@ export const CallModal: React.FC = () => {
             <View style={s.actionCol}>
               <TouchableOpacity
                 onPress={handleRejectCall}
-                style={[s.circleBtn, { backgroundColor: '#EF4444' }]}
+                style={[s.circleActionBtn, { backgroundColor: '#EF4444' }]}
                 activeOpacity={0.8}
               >
-                <PhoneOff size={28} color="#FFFFFF" />
+                <PhoneOff size={30} color="#FFFFFF" />
               </TouchableOpacity>
               <Text style={[s.actionBtnLabel, { color: colors.textMuted }]}>Decline</Text>
             </View>
@@ -402,10 +388,10 @@ export const CallModal: React.FC = () => {
             <View style={s.actionCol}>
               <TouchableOpacity
                 onPress={handleAnswerCall}
-                style={[s.circleBtn, { backgroundColor: '#10B981' }]}
+                style={[s.circleActionBtn, { backgroundColor: '#10B981' }]}
                 activeOpacity={0.8}
               >
-                <Phone size={28} color="#FFFFFF" />
+                <Phone size={30} color="#FFFFFF" />
               </TouchableOpacity>
               <Text style={[s.actionBtnLabel, { color: colors.textMuted }]}>Answer</Text>
             </View>
@@ -424,26 +410,18 @@ export const CallModal: React.FC = () => {
       <SafeAreaView style={[s.fullScreenCall, { backgroundColor: colors.bg }]}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
 
-        {/* Top Header Pill */}
-        <View
-          style={[
-            s.secureBadge,
-            {
-              backgroundColor: colors.surfaceSecondary,
-              borderColor: colors.border,
-            },
-          ]}
-        >
+        {/* Minimalist Top Tag */}
+        <View style={s.topBar}>
           <View
             style={[
-              s.statusDot,
+              s.liveDot,
               {
                 backgroundColor: isCallingOutbound ? colors.primary : '#10B981',
               },
             ]}
           />
-          <Text style={[s.secureBadgeText, { color: colors.textSecondary }]}>
-            {isCallingOutbound ? 'Calling...' : isEnded ? 'Call Finished' : 'Call in Progress'}
+          <Text style={[s.topBarText, { color: colors.textMuted }]}>
+            {isCallingOutbound ? 'OUTBOUND VOIP LINE' : isEnded ? 'CALL ENDED' : 'GLOBEVERIFY HD VOICE'}
           </Text>
         </View>
 
@@ -453,12 +431,11 @@ export const CallModal: React.FC = () => {
             style={[
               s.avatarCircle,
               {
-                backgroundColor: colors.surfaceSecondary,
-                borderColor: colors.border,
+                backgroundColor: isDark ? 'rgba(59, 130, 246, 0.12)' : '#EFF6FF',
               },
             ]}
           >
-            <User size={38} color={colors.primary} />
+            <User size={42} color={colors.primary} />
           </View>
 
           <Text
@@ -484,26 +461,30 @@ export const CallModal: React.FC = () => {
               : formatSeconds(callDuration)}
           </Text>
 
-          <View
-            style={[
-              s.lineSubPill,
-              {
-                backgroundColor: colors.surfaceSecondary,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text style={[s.myNumberSubtitle, { color: colors.textMuted }]}>
-              Via:{' '}
-              <Text style={{ fontWeight: '600', color: colors.textSecondary }}>
-                {currentCall?.phoneNumber || 'Private Line'}
-              </Text>
-            </Text>
-          </View>
+          <Text style={[s.myNumberSubtitle, { color: colors.textMuted }]}>
+            via {currentCall?.phoneNumber || 'Private Line'}
+          </Text>
         </View>
 
-        {/* Mid-Call Controls: Mute & Speaker */}
+        {/* In-Call Keypad Overlay (if opened by user during automated prompt) */}
+        {showInCallKeypad ? (
+          <View style={s.inCallKeypadGrid}>
+            {DIALPAD_KEYS.map((k) => (
+              <TouchableOpacity
+                key={k.digit}
+                style={[s.inCallKey, { backgroundColor: colors.surfaceSecondary }]}
+                onPress={() => handleDtmfPress(k.digit)}
+                activeOpacity={0.6}
+              >
+                <Text style={[s.inCallKeyDigit, { color: colors.text }]}>{k.digit}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
+
+        {/* In-Call Controls Toolbar: Mute, Keypad, Speaker */}
         <View style={s.controlsRow}>
+          {/* Mute */}
           <View style={s.ctrlItem}>
             <TouchableOpacity
               style={[
@@ -511,10 +492,9 @@ export const CallModal: React.FC = () => {
                 {
                   backgroundColor: isMuted
                     ? isDark
-                      ? 'rgba(239, 68, 68, 0.16)'
-                      : '#FEF2F2'
+                      ? 'rgba(239, 68, 68, 0.22)'
+                      : '#FEE2E2'
                     : colors.surfaceSecondary,
-                  borderColor: isMuted ? '#EF4444' : colors.border,
                 },
               ]}
               onPress={handleToggleMute}
@@ -536,6 +516,38 @@ export const CallModal: React.FC = () => {
             </Text>
           </View>
 
+          {/* Keypad */}
+          <View style={s.ctrlItem}>
+            <TouchableOpacity
+              style={[
+                s.ctrlCircle,
+                {
+                  backgroundColor: showInCallKeypad
+                    ? isDark
+                      ? 'rgba(59, 130, 246, 0.22)'
+                      : '#DBEAFE'
+                    : colors.surfaceSecondary,
+                },
+              ]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                setShowInCallKeypad((prev) => !prev);
+              }}
+              activeOpacity={0.7}
+            >
+              <Grid3x3 size={24} color={showInCallKeypad ? colors.primary : colors.text} />
+            </TouchableOpacity>
+            <Text
+              style={[
+                s.ctrlLabel,
+                { color: showInCallKeypad ? colors.primary : colors.textMuted },
+              ]}
+            >
+              Keypad
+            </Text>
+          </View>
+
+          {/* Speaker */}
           <View style={s.ctrlItem}>
             <TouchableOpacity
               style={[
@@ -543,10 +555,9 @@ export const CallModal: React.FC = () => {
                 {
                   backgroundColor: isSpeaker
                     ? isDark
-                      ? 'rgba(37, 99, 235, 0.16)'
-                      : '#EFF6FF'
+                      ? 'rgba(59, 130, 246, 0.22)'
+                      : '#DBEAFE'
                     : colors.surfaceSecondary,
-                  borderColor: isSpeaker ? colors.primary : colors.border,
                 },
               ]}
               onPress={handleToggleSpeaker}
@@ -564,29 +575,48 @@ export const CallModal: React.FC = () => {
                 { color: isSpeaker ? colors.primary : colors.textMuted },
               ]}
             >
-              {isSpeaker ? 'Speaker On' : 'Speaker'}
+              Speaker
             </Text>
           </View>
         </View>
 
-        {/* Bottom Hangup Area */}
+        {/* Bottom Hangup Button */}
         <View style={s.hangupArea}>
           <TouchableOpacity
             onPress={handleHangup}
-            style={[s.circleBtn, { backgroundColor: '#EF4444' }]}
+            style={s.hangupBtn}
             activeOpacity={0.8}
           >
-            <PhoneOff size={30} color="#FFFFFF" />
+            <PhoneOff size={32} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={[s.actionBtnLabel, { color: colors.textMuted }]}>End Call</Text>
         </View>
 
-        {/* Headless WebRTC Audio Engine (Full 2-way microphone & audio playback) */}
+        {/* Headless WebRTC Audio Engine - COMPLETELY OFFSCREEN & ZERO DIMENSIONS */}
         {engineUrl && (
           <HeadlessWebView
             ref={engineWebViewRef}
             source={{ uri: engineUrl }}
-            style={{ width: 1, height: 1, opacity: 0.01, position: 'absolute', bottom: 0, right: 0 }}
+            containerStyle={{
+              position: 'absolute',
+              top: -9999,
+              left: -9999,
+              width: 0,
+              height: 0,
+              opacity: 0,
+              flex: 0,
+            }}
+            style={{
+              width: 0,
+              height: 0,
+              opacity: 0,
+            }}
+            scrollEnabled={false}
+            bounces={false}
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            overScrollMode="never"
+            pointerEvents="none"
             javaScriptEnabled
             domStorageEnabled
             mediaPlaybackRequiresUserAction={false}
@@ -618,107 +648,97 @@ const s = StyleSheet.create({
     flex: 1,
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 28,
-    paddingHorizontal: 24,
+    paddingVertical: 24,
+    paddingHorizontal: 28,
   },
-  secureBadge: {
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1,
+    paddingTop: 8,
   },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
-  secureBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
+  topBarText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.8,
   },
   callerArea: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
+    gap: 8,
     width: '100%',
-    paddingHorizontal: 20,
   },
   avatarWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   avatarCircle: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    borderWidth: 1.5,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
   pulseRing: {
     position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 1.5,
-    opacity: 0.25,
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    borderWidth: 2,
+    opacity: 0.28,
   },
   callStateLabel: {
     color: '#10B981',
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.5,
   },
   remoteNumberText: {
-    fontSize: 27,
+    fontSize: 30,
     fontWeight: '700',
-    letterSpacing: -0.3,
+    letterSpacing: -0.5,
     textAlign: 'center',
-  },
-  lineSubPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 14,
-    borderWidth: 1,
     marginTop: 2,
   },
   myNumberSubtitle: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '500',
+    marginTop: 2,
   },
   callTimerText: {
-    fontSize: 21,
+    fontSize: 22,
     fontWeight: '700',
     letterSpacing: 0.5,
+    marginTop: 2,
   },
   incomingActionRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     width: '100%',
-    paddingHorizontal: 36,
+    paddingHorizontal: 32,
+    paddingBottom: 16,
   },
   actionCol: {
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
-  circleBtn: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+  circleActionBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 6,
   },
   actionBtnLabel: {
     fontSize: 13,
@@ -727,149 +747,168 @@ const s = StyleSheet.create({
   controlsRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 36,
+    gap: 32,
   },
   ctrlItem: {
     alignItems: 'center',
     gap: 8,
   },
   ctrlCircle: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    borderWidth: 1,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
   ctrlLabel: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   hangupArea: {
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+    paddingBottom: 8,
+  },
+  hangupBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  inCallKeypadGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    width: '100%',
+    maxWidth: 260,
+    gap: 12,
+    marginVertical: 12,
+  },
+  inCallKey: {
+    width: 64,
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inCallKeyDigit: {
+    fontSize: 20,
+    fontWeight: '600',
   },
   // ── Dialpad Modal Styles ──────────────────────────────────────────────────
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
   },
-  modalCard: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderTopWidth: 1,
-    paddingHorizontal: 24,
+  dialpadSheet: {
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
+    paddingHorizontal: 28,
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 24 : 32,
   },
   handleBar: {
-    width: 36,
+    width: 38,
     height: 4,
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: 14,
+    marginBottom: 16,
   },
-  dialpadHeader: {
+  sheetHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  dialpadHeaderLeft: {
-    gap: 4,
-  },
-  dialpadTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-  },
-  lineBadge: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignSelf: 'flex-start',
+    marginBottom: 8,
   },
-  lineBadgeText: {
-    fontSize: 11.5,
+  sheetTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: -0.3,
   },
-  closeBtn: {
+  sheetSubtitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  sheetCloseBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  numberDisplayArea: {
-    minHeight: 56,
+  numberDisplayRow: {
+    minHeight: 64,
     justifyContent: 'center',
     alignItems: 'center',
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    marginBottom: 16,
-    borderBottomWidth: 1,
+    marginVertical: 12,
+    paddingHorizontal: 20,
   },
   numberText: {
-    fontSize: 28,
-    fontWeight: '700',
-    letterSpacing: 1,
+    fontSize: 32,
+    fontWeight: '600',
+    letterSpacing: 1.5,
     textAlign: 'center',
-    paddingHorizontal: 24,
   },
   backspaceBtn: {
     position: 'absolute',
-    right: 4,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    right: 0,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dialpadGrid: {
+  keysGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 12,
+    justifyContent: 'center',
+    gap: 24,
+    rowGap: 14,
     marginBottom: 20,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
   },
-  dialKey: {
-    width: '30%',
-    aspectRatio: 1.25,
-    borderRadius: 18,
-    borderWidth: 1,
+  circularKey: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dialDigit: {
-    fontSize: 24,
-    fontWeight: '600',
+  keyDigit: {
+    fontSize: 28,
+    fontWeight: '400',
   },
-  dialSub: {
+  keySub: {
     fontSize: 9.5,
     fontWeight: '600',
-    letterSpacing: 1.5,
+    letterSpacing: 1.8,
     marginTop: 1,
   },
-  dialActionArea: {
+  callActionArea: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingTop: 4,
   },
   callBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     backgroundColor: '#10B981',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#10B981',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
   },
 });
