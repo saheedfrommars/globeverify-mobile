@@ -12,6 +12,7 @@ import * as Haptics from 'expo-haptics';
 import apiClient from '../api/client';
 import { socketService } from '../services/socketService';
 import { onIncomingCallReceived } from '../services/pushNotificationService';
+import { requestMicrophonePermission } from '../utils/permissionUtils';
 import { callLogService, CallLogItem } from '../services/callLogService';
 import { useAuth } from './AuthContext';
 
@@ -222,15 +223,19 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     const unsubSocketEnded = socketService.subscribe('call_ended', () => {
-      stopRingVibration();
-      stopDurationTimer();
-      recordCallLog();
-      setCallState('ended');
-      setTimeout(() => {
-        setCallState('idle');
-        setCurrentCall(null);
-        setCallDuration(0);
-      }, 800);
+      setCallState((prev) => {
+        // Prevent duplicate trigger if already idle or ended
+        if (prev === 'idle' || prev === 'ended') return prev;
+        stopRingVibration();
+        stopDurationTimer();
+        recordCallLog();
+        setTimeout(() => {
+          setCallState('idle');
+          setCurrentCall(null);
+          setCallDuration(0);
+        }, 500);
+        return 'ended';
+      });
     });
 
     const unsubPush = onIncomingCallReceived((data) => {
@@ -257,6 +262,7 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const answerCall = async () => {
     if (!currentCall?.rentalId || !currentCall?.callControlId) return;
     stopRingVibration();
+    await requestMicrophonePermission().catch(() => {});
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
 
     try {
@@ -296,6 +302,7 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Terminate an active or outbound call (Immediate UI response + background API)
   const hangupCall = async () => {
+    if (callState === 'idle' || callState === 'ended') return;
     stopRingVibration();
     stopDurationTimer();
     recordCallLog();
@@ -321,7 +328,7 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setCallState('idle');
       setCurrentCall(null);
       setCallDuration(0);
-    }, 800);
+    }, 500);
   };
 
   // Make an outbound call from the mobile app
@@ -331,6 +338,7 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     toNumber: string
   ): Promise<boolean> => {
     try {
+      await requestMicrophonePermission().catch(() => {});
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       setIsDialpadOpen(false);
 

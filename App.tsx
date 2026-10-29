@@ -10,6 +10,7 @@ import {
   setupNotificationResponseListener,
   setupAndroidNotificationChannel,
 } from './src/services/pushNotificationService';
+import { requestMicrophonePermission } from './src/utils/permissionUtils';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
@@ -136,9 +137,10 @@ function MainNavigator() {
     return () => sub.remove();
   }, [loginWithToken]);
 
-  // ── Push Notification Tap Response & Channel Setup ───────────────────────
+  // ── Push Notification Tap Response, Mic Permissions & Channel Setup ───────
   useEffect(() => {
     setupAndroidNotificationChannel().catch(() => {});
+    requestMicrophonePermission().catch(() => {});
     const unsub = setupNotificationResponseListener((screen) => {
       if (isAuthedRef.current) {
         setActiveAppScreen(screen);

@@ -92,6 +92,9 @@ export async function setupCallNotificationCategory() {
   }
 }
 
+// Ensure category is immediately initialized on bundle import
+setupCallNotificationCategory().catch(() => {});
+
 /**
  * Reject call directly from background if user taps Decline action button.
  */

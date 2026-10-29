@@ -1,3 +1,4 @@
+import { requestMicrophonePermission } from '../../utils/permissionUtils';
 import { WebView } from 'react-native-webview';
 const HeadlessWebView = WebView as any;
 import React, { useState, useEffect, useRef } from 'react';
@@ -199,6 +200,7 @@ export const CallModal: React.FC = () => {
     const numToCall = targetNumber || dialedNumber;
     if (!numToCall.trim() || !dialpadRentalId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    await requestMicrophonePermission().catch(() => {});
     let num = numToCall.trim();
     if (!num.startsWith('+')) {
       num = '+' + num;
@@ -225,6 +227,7 @@ export const CallModal: React.FC = () => {
 
   const handleAnswerCall = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    await requestMicrophonePermission().catch(() => {});
     answerCall();
     const rentalId = currentCall?.rentalId;
     if (rentalId) {
@@ -860,10 +863,17 @@ export const CallModal: React.FC = () => {
             domStorageEnabled
             mediaPlaybackRequiresUserAction={false}
             allowsInlineMediaPlayback={true}
+            mediaCapturePermissionGrantType="grant"
             androidLayerType="hardware"
             originWhitelist={['*']}
             onPermissionRequest={(event: any) => {
-              event.request.grant(event.request.getResources());
+              try {
+                if (event?.request?.grant) {
+                  event.request.grant(event.request.getResources?.() || event.resources || []);
+                }
+              } catch (e) {
+                console.warn('[CallModal] onPermissionRequest grant error:', e);
+              }
             }}
             onLoadEnd={() => {
               engineWebViewRef.current?.injectJavaScript('if (window.callEngineAnswer) { window.callEngineAnswer(); } true;');
