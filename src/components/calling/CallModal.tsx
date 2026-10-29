@@ -407,7 +407,7 @@ export const CallModal: React.FC = () => {
           <WebView
             ref={engineWebViewRef}
             source={{ uri: engineUrl }}
-            style={{ width: 0, height: 0, opacity: 0, position: 'absolute' }}
+            style={{ width: 1, height: 1, opacity: 0.01, position: 'absolute', bottom: 0, right: 0 }}
             javaScriptEnabled
             domStorageEnabled
             mediaPlaybackRequiresUserAction={false}
@@ -415,6 +415,9 @@ export const CallModal: React.FC = () => {
             originWhitelist={['*']}
             onPermissionRequest={(event: any) => {
               event.request.grant(event.request.getResources());
+            }}
+            onLoadEnd={() => {
+              engineWebViewRef.current?.injectJavaScript('if (window.callEngineAnswer) { window.callEngineAnswer(); } true;');
             }}
             onMessage={(e: any) => {
               try {
