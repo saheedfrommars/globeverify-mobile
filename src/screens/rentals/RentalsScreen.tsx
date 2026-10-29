@@ -1226,11 +1226,42 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                     >
                       {/* Top Info Header */}
                       <View style={s.activeCardTop}>
-                        <View style={{ flex: 1, gap: 2 }}>
+                        <View style={{ flex: 1, gap: 4 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                             <Text style={[s.rentalPhone, { color: colors.text }]}>
                               {rental.phoneNumber}
                             </Text>
+
+                            {/* Copy / Clipboard Button right beside number */}
+                            <TouchableOpacity
+                              onPress={() => handleCopy(rental.phoneNumber, rental.id)}
+                              style={[s.inlineActionIconBtn, { borderColor: colors.border }]}
+                              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                              activeOpacity={0.7}
+                            >
+                              {isCopied ? (
+                                <Check size={13} color={colors.primary} />
+                              ) : (
+                                <Copy size={13} color={colors.textSecondary} />
+                              )}
+                            </TouchableOpacity>
+
+                            {/* Call Logs button right beside number (VoIP only) */}
+                            {isVoip && (
+                              <TouchableOpacity
+                                style={[s.inlineLogsBtn, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
+                                onPress={() => {
+                                  triggerHaptic('selection');
+                                  openDialpad(rental.id, rental.phoneNumber, 'recents');
+                                }}
+                                hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                                activeOpacity={0.7}
+                              >
+                                <Clock size={11} color={colors.textSecondary} />
+                                <Text style={[s.inlineLogsBtnText, { color: colors.textSecondary }]}>Logs</Text>
+                              </TouchableOpacity>
+                            )}
+
                             <View
                               style={[
                                 s.lineTypeBadge,
@@ -1263,7 +1294,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                         </Text>
                       </View>
 
-                      {/* Action Buttons Row */}
+                      {/* Action Buttons Row - Clean, balanced, and no horizontal overflow */}
                       <View style={s.activeCardActions}>
                         {/* Call button: ONLY FOR VOIP NUMBERS! */}
                         {isVoip && (
@@ -1277,21 +1308,6 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                           >
                             <Phone size={13} color="#FFFFFF" />
                             <Text style={s.blueActionBtnText}>Call</Text>
-                          </TouchableOpacity>
-                        )}
-
-                        {/* Call Logs button: ONLY FOR VOIP NUMBERS! */}
-                        {isVoip && (
-                          <TouchableOpacity
-                            style={[s.outlineActionBtn, { borderColor: colors.border }]}
-                            onPress={() => {
-                              triggerHaptic('selection');
-                              openDialpad(rental.id, rental.phoneNumber, 'recents');
-                            }}
-                            activeOpacity={0.8}
-                          >
-                            <Clock size={13} color={colors.textSecondary} />
-                            <Text style={[s.outlineActionBtnText, { color: colors.textSecondary }]}>Logs</Text>
                           </TouchableOpacity>
                         )}
 
@@ -1310,23 +1326,10 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                           </Text>
                         </TouchableOpacity>
 
-                        {/* Copy Phone */}
-                        <TouchableOpacity
-                          onPress={() => handleCopy(rental.phoneNumber, rental.id)}
-                          style={[s.iconActionBtn, { borderColor: colors.border }]}
-                          hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                        >
-                          {isCopied ? (
-                            <Check size={16} color={colors.primary} />
-                          ) : (
-                            <Copy size={16} color={colors.textMuted} />
-                          )}
-                        </TouchableOpacity>
-
                         {/* Cancel / Release Number */}
                         <TouchableOpacity
                           onPress={() => handleCancelRental(rental.id, rental.phoneNumber)}
-                          style={[s.iconActionBtn, { borderColor: 'rgba(239, 68, 68, 0.25)' }]}
+                          style={[s.iconActionBtn, { borderColor: 'rgba(239, 68, 68, 0.25)', marginLeft: 'auto' }]}
                           hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                         >
                           <XCircle size={16} color="#EF4444" />
@@ -1973,6 +1976,26 @@ const s = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  inlineActionIconBtn: {
+    padding: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineLogsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  inlineLogsBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
   serviceRow: {
     padding: 16,

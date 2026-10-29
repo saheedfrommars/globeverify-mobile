@@ -99,8 +99,20 @@ export const CallModal: React.FC = () => {
     if (callState === 'idle') {
       setEngineUrl(null);
       setShowInCallKeypad(false);
+    } else if (callState === 'ringing_inbound' && currentCall?.rentalId && !engineUrl) {
+      // Pre-warm the headless WebRTC engine so it's connected when the user taps Answer
+      apiClient
+        .get(`/numbers/rentals/${currentCall.rentalId}/voice-token`)
+        .then((res) => {
+          const token = res.data?.token || '';
+          if (token) {
+            const url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(currentCall.phoneNumber || '')}&rentalId=${currentCall.rentalId}&mode=engine`;
+            setEngineUrl(url);
+          }
+        })
+        .catch((e: any) => console.warn('[CallModal] Pre-warm engine token error:', e?.message));
     }
-  }, [callState]);
+  }, [callState, currentCall?.rentalId, currentCall?.phoneNumber, engineUrl]);
 
   // Dialpad state
   const [dialedNumber, setDialedNumber] = useState('');
@@ -819,24 +831,24 @@ export const CallModal: React.FC = () => {
           <Text style={[s.actionBtnLabel, { color: colors.textMuted }]}>End Call</Text>
         </View>
 
-        {/* Headless WebRTC Audio Engine - COMPLETELY OFFSCREEN & ZERO DIMENSIONS */}
+        {/* Headless WebRTC Audio Engine with hardware acceleration and active surface */}
         {engineUrl && (
           <HeadlessWebView
             ref={engineWebViewRef}
             source={{ uri: engineUrl }}
             containerStyle={{
               position: 'absolute',
-              top: -9999,
-              left: -9999,
-              width: 0,
-              height: 0,
-              opacity: 0,
-              flex: 0,
+              bottom: 0,
+              right: 0,
+              width: 2,
+              height: 2,
+              opacity: 0.01,
+              zIndex: -1,
             }}
             style={{
-              width: 0,
-              height: 0,
-              opacity: 0,
+              width: 2,
+              height: 2,
+              opacity: 0.01,
             }}
             scrollEnabled={false}
             bounces={false}
@@ -847,7 +859,8 @@ export const CallModal: React.FC = () => {
             javaScriptEnabled
             domStorageEnabled
             mediaPlaybackRequiresUserAction={false}
-            allowsInlineMediaPlayback
+            allowsInlineMediaPlayback={true}
+            androidLayerType="hardware"
             originWhitelist={['*']}
             onPermissionRequest={(event: any) => {
               event.request.grant(event.request.getResources());

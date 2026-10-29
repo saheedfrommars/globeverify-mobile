@@ -6,7 +6,10 @@ import {
   clearPendingReferral,
   markDeepLinkScreenLaunch,
 } from './src/services/deepLinkService';
-import { setupNotificationResponseListener } from './src/services/pushNotificationService';
+import {
+  setupNotificationResponseListener,
+  setupAndroidNotificationChannel,
+} from './src/services/pushNotificationService';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
@@ -133,8 +136,9 @@ function MainNavigator() {
     return () => sub.remove();
   }, [loginWithToken]);
 
-  // ── Push Notification Tap Response ───────────────────────────────────────
+  // ── Push Notification Tap Response & Channel Setup ───────────────────────
   useEffect(() => {
+    setupAndroidNotificationChannel().catch(() => {});
     const unsub = setupNotificationResponseListener((screen) => {
       if (isAuthedRef.current) {
         setActiveAppScreen(screen);

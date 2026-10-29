@@ -62,7 +62,7 @@ export const triggerIncomingCallEvent = (callData: any) => {
 /**
  * Configure Android notification channels with high importance and vibration.
  */
-async function setupAndroidNotificationChannel() {
+export async function setupAndroidNotificationChannel() {
   if (Platform.OS === 'android' && Notifications && typeof Notifications.setNotificationChannelAsync === 'function') {
     try {
       // 1. General notifications (OTPs, balance updates)
