@@ -115,7 +115,7 @@ export const CallModal: React.FC = () => {
 
   const [isOpeningWebRtc, setIsOpeningWebRtc] = useState(false);
 
-  const handleOpenWebRtcSoftphone = async () => {
+  const launchSoftphone = async (destNumber?: string) => {
     if (!dialpadRentalId) return;
     try {
       setIsOpeningWebRtc(true);
@@ -123,7 +123,17 @@ export const CallModal: React.FC = () => {
       const res = await apiClient.get(`/numbers/rentals/${dialpadRentalId}/voice-token`);
       const token = res.data?.token || '';
       closeDialpad();
-      const url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(dialpadFromNumber || '')}&rentalId=${dialpadRentalId}`;
+
+      let target = (destNumber || dialedNumber || '').trim();
+      if (target && !target.startsWith('+')) {
+        target = '+' + target;
+      }
+
+      let url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(dialpadFromNumber || '')}&rentalId=${dialpadRentalId}`;
+      if (target) {
+        url += `&to=${encodeURIComponent(target)}`;
+      }
+
       await WebBrowser.openBrowserAsync(url, {
         presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
         toolbarColor: '#0F172A',
@@ -133,7 +143,12 @@ export const CallModal: React.FC = () => {
       Alert.alert('WebRTC Voice', err?.response?.data?.message || 'Could not initialize WebRTC softphone.');
     } finally {
       setIsOpeningWebRtc(false);
+      setDialedNumber('');
     }
+  };
+
+  const handleOpenWebRtcSoftphone = () => {
+    launchSoftphone();
   };
 
   const handleStartCall = () => {
@@ -142,12 +157,26 @@ export const CallModal: React.FC = () => {
     if (!num.startsWith('+')) {
       num = '+' + num;
     }
-    startOutboundCall(
-      dialpadRentalId,
-      dialpadFromNumber || 'Leased Number',
-      num
-    );
-    setDialedNumber('');
+    launchSoftphone(num);
+  };
+
+  const handleAnswerIncoming = async () => {
+    const rentalId = currentCall?.rentalId;
+    answerCall();
+    if (rentalId) {
+      try {
+        const res = await apiClient.get(`/numbers/rentals/${rentalId}/voice-token`);
+        const token = res.data?.token || '';
+        const url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(currentCall?.phoneNumber || '')}&rentalId=${rentalId}`;
+        await WebBrowser.openBrowserAsync(url, {
+          presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
+          toolbarColor: '#0F172A',
+          controlsColor: '#FFFFFF',
+        });
+      } catch (e) {
+        console.warn('Error opening incoming softphone:', e);
+      }
+    }
   };
 
   const isModalVisible = callState !== 'idle' || isDialpadOpen;
@@ -308,7 +337,7 @@ export const CallModal: React.FC = () => {
 
             <View style={s.actionCol}>
               <TouchableOpacity
-                onPress={answerCall}
+                onPress={handleAnswerIncoming}
                 style={[s.circleBtn, { backgroundColor: '#10B981' }]}
                 activeOpacity={0.8}
               >

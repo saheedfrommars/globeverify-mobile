@@ -136,8 +136,11 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const unsubSocketAnswered = socketService.subscribe('call_answered', (data) => {
       stopRingVibration();
-      setCallState('connected');
-      startDurationTimer();
+      setCallState((prev) => {
+        if (prev === 'ended' || prev === 'idle') return prev;
+        startDurationTimer();
+        return 'connected';
+      });
     });
 
     const unsubSocketEnded = socketService.subscribe('call_ended', () => {
@@ -148,7 +151,7 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setCallState('idle');
         setCurrentCall(null);
         setCallDuration(0);
-      }, 1800);
+      }, 800);
     });
 
     const unsubPush = onIncomingCallReceived((data) => {
@@ -192,51 +195,51 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Reject an incoming call
   const rejectCall = async () => {
-    if (!currentCall?.rentalId || !currentCall?.callControlId) {
-      stopRingVibration();
-      setCallState('idle');
-      setCurrentCall(null);
-      return;
-    }
     stopRingVibration();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+    const rId = currentCall?.rentalId;
+    const cId = currentCall?.callControlId;
 
-    try {
-      await apiClient.post(`/numbers/rentals/${currentCall.rentalId}/call-action`, {
+    setCallState('idle');
+    setCurrentCall(null);
+
+    if (rId && cId) {
+      apiClient.post(`/numbers/rentals/${rId}/call-action`, {
         action: 'reject',
-        callControlId: currentCall.callControlId,
+        callControlId: cId,
+      }).catch((err) => {
+        console.warn('[CallContext] Failed to reject call:', err?.message);
       });
-    } catch (err) {
-      console.warn('[CallContext] Failed to reject call:', err);
-    } finally {
-      setCallState('idle');
-      setCurrentCall(null);
     }
   };
 
-  // Terminate an active or outbound call
+  // Terminate an active or outbound call (Immediate UI response + background API)
   const hangupCall = async () => {
     stopRingVibration();
     stopDurationTimer();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
 
-    if (currentCall?.rentalId && currentCall?.callControlId) {
-      try {
-        await apiClient.post(`/numbers/rentals/${currentCall.rentalId}/call-action`, {
-          action: 'hangup',
-          callControlId: currentCall.callControlId,
-        });
-      } catch (err) {
-        console.warn('[CallContext] Failed to hang up call:', err);
-      }
+    const rId = currentCall?.rentalId;
+    const cId = currentCall?.callControlId;
+
+    // Immediately reflect ended state so user sees instant response
+    setCallState('ended');
+
+    // Fire API call asynchronously in background without blocking UI
+    if (rId && cId) {
+      apiClient.post(`/numbers/rentals/${rId}/call-action`, {
+        action: 'hangup',
+        callControlId: cId,
+      }).catch((err) => {
+        console.warn('[CallContext] Failed to hang up call:', err?.message);
+      });
     }
 
-    setCallState('ended');
     setTimeout(() => {
       setCallState('idle');
       setCurrentCall(null);
       setCallDuration(0);
-    }, 1500);
+    }, 800);
   };
 
   // Make an outbound call from the mobile app
