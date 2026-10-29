@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import * as WebBrowser from 'expo-web-browser';
 import apiClient from '../../api/client';
 import {
   Phone,
@@ -26,7 +25,6 @@ import {
   Delete,
   X,
   ShieldCheck,
-  Sparkles,
 } from 'lucide-react-native';
 import { useCall } from '../../context/CallContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
@@ -113,70 +111,18 @@ export const CallModal: React.FC = () => {
     setDialedNumber((prev) => prev.slice(0, -1));
   };
 
-  const [isOpeningWebRtc, setIsOpeningWebRtc] = useState(false);
-
-  const launchSoftphone = async (destNumber?: string) => {
-    if (!dialpadRentalId) return;
-    try {
-      setIsOpeningWebRtc(true);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      const res = await apiClient.get(`/numbers/rentals/${dialpadRentalId}/voice-token`);
-      const token = res.data?.token || '';
-      closeDialpad();
-
-      let target = (destNumber || dialedNumber || '').trim();
-      if (target && !target.startsWith('+')) {
-        target = '+' + target;
-      }
-
-      let url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(dialpadFromNumber || '')}&rentalId=${dialpadRentalId}`;
-      if (target) {
-        url += `&to=${encodeURIComponent(target)}`;
-      }
-
-      await WebBrowser.openBrowserAsync(url, {
-        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-        toolbarColor: '#0F172A',
-        controlsColor: '#FFFFFF',
-      });
-    } catch (err: any) {
-      Alert.alert('WebRTC Voice', err?.response?.data?.message || 'Could not initialize WebRTC softphone.');
-    } finally {
-      setIsOpeningWebRtc(false);
-      setDialedNumber('');
-    }
-  };
-
-  const handleOpenWebRtcSoftphone = () => {
-    launchSoftphone();
-  };
-
   const handleStartCall = () => {
     if (!dialedNumber.trim() || !dialpadRentalId) return;
     let num = dialedNumber.trim();
     if (!num.startsWith('+')) {
       num = '+' + num;
     }
-    launchSoftphone(num);
-  };
-
-  const handleAnswerIncoming = async () => {
-    const rentalId = currentCall?.rentalId;
-    answerCall();
-    if (rentalId) {
-      try {
-        const res = await apiClient.get(`/numbers/rentals/${rentalId}/voice-token`);
-        const token = res.data?.token || '';
-        const url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(currentCall?.phoneNumber || '')}&rentalId=${rentalId}`;
-        await WebBrowser.openBrowserAsync(url, {
-          presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-          toolbarColor: '#0F172A',
-          controlsColor: '#FFFFFF',
-        });
-      } catch (e) {
-        console.warn('Error opening incoming softphone:', e);
-      }
-    }
+    startOutboundCall(
+      dialpadRentalId,
+      dialpadFromNumber || 'Leased Number',
+      num
+    );
+    setDialedNumber('');
   };
 
   const isModalVisible = callState !== 'idle' || isDialpadOpen;
@@ -210,28 +156,7 @@ export const CallModal: React.FC = () => {
               </TouchableOpacity>
             </View>
 
-            {/* Launch WebRTC HD Audio Softphone */}
-            <TouchableOpacity
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: '#2563EB',
-                paddingVertical: 10,
-                paddingHorizontal: 16,
-                borderRadius: 10,
-                marginTop: 6,
-                marginBottom: 10,
-              }}
-              onPress={handleOpenWebRtcSoftphone}
-              disabled={isOpeningWebRtc}
-              activeOpacity={0.8}
-            >
-              <Sparkles size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
-              <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
-                {isOpeningWebRtc ? 'Connecting Voice...' : 'Launch WebRTC Softphone (Live Audio)'}
-              </Text>
-            </TouchableOpacity>
+
 
             {/* Dialed Number Display */}
             <View style={s.numberDisplayArea}>
@@ -337,7 +262,7 @@ export const CallModal: React.FC = () => {
 
             <View style={s.actionCol}>
               <TouchableOpacity
-                onPress={handleAnswerIncoming}
+                onPress={answerCall}
                 style={[s.circleBtn, { backgroundColor: '#10B981' }]}
                 activeOpacity={0.8}
               >
