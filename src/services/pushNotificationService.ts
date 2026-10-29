@@ -153,7 +153,7 @@ export async function registerForPushNotificationsAsync(): Promise<PushRegistrat
     console.log('[PushService] Push notifications registered successfully:', expoPushToken);
     return { success: true, token: expoPushToken };
   } catch (error: any) {
-    console.error('[PushService] Registration error:', error?.response?.data || error.message);
+    console.warn('[PushService] Registration error:', error?.response?.data || error.message);
     return {
       success: false,
       error: error?.response?.data?.message || error.message || 'Push registration failed',
