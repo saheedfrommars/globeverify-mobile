@@ -89,10 +89,6 @@ export async function setupAndroidNotificationChannel() {
         showBadge: true,
         bypassDnd: true,
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        audioAttributes: {
-          usage: Notifications.AndroidAudioUsage.NOTIFICATION_RINGTONE,
-          contentType: Notifications.AndroidAudioContentType.SONIFICATION,
-        },
       });
     } catch (err) {
       console.log('[PushService] setupAndroidNotificationChannel notice:', err);
