@@ -675,114 +675,121 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
                     </Text>
                   ) : null}
 
-                  {/* Messages Area: Displays 2–3 Messages at a Time, Tap Code or Tap Message to Copy! */}
+                  {/* Messages Area: Displays 2–3 Messages at a Time (Latest at TOP), Tap Code or Tap Message to Copy! */}
                   {num.otps && num.otps.length > 0 ? (
-                    <View style={s.mncMessagesWrapper}>
-                      <ScrollView
-                        style={s.mncMessagesScroll}
-                        contentContainerStyle={{ gap: 10 }}
-                        nestedScrollEnabled
-                        showsVerticalScrollIndicator={num.otps.length > 2}
-                      >
-                        {(expandedCardIds[numId]
-                          ? num.otps
-                          : num.otps.slice(0, 3)
-                        ).map((otp, idx) => {
-                          const isOtpCopied = copiedKey === `otp-${numId}-${idx}`;
-                          const isMsgCopied = copiedKey === `msg-${numId}-${idx}`;
-                          const clean = cleanMessage(otp.message || otp.code);
-                          const safeCode = extractOtpCode(otp.code, otp.message);
-                          return (
-                            <View
-                              key={idx}
-                              style={[
-                                s.mncMessageBubble,
-                                {
-                                  backgroundColor: colors.isDark
-                                    ? 'rgba(255,255,255,0.04)'
-                                    : 'rgba(15, 23, 42, 0.035)',
-                                },
-                              ]}
-                            >
-                              {/* Tap Code Header to Copy Verification Code */}
-                              <TouchableOpacity
-                                style={s.mncBubbleHeader}
-                                onPress={() =>
-                                  handleCopy(
-                                    safeCode,
-                                    `otp-${numId}-${idx}`,
-                                    `Code ${safeCode} copied!`
-                                  )
-                                }
-                                activeOpacity={0.7}
-                              >
-                                <Text
-                                  style={s.mncCode}
-                                  numberOfLines={1}
-                                  adjustsFontSizeToFit
-                                >
-                                  {safeCode}
-                                </Text>
-                                <View style={s.copyActionWrap}>
-                                  {isOtpCopied ? (
-                                    <Check size={15} color="#10B981" />
-                                  ) : (
-                                    <Copy size={15} color={colors.textMuted} />
-                                  )}
-                                </View>
-                              </TouchableOpacity>
+                    (() => {
+                      // Reverse so the newest OTP/message is always at the TOP
+                      const reversedOtps = [...num.otps].reverse();
+                      const displayedOtps = expandedCardIds[numId]
+                        ? reversedOtps
+                        : reversedOtps.slice(0, 3);
 
-                              {/* Tap Message Text to Copy Full SMS Message (Matches Web NumberCard.tsx!) */}
-                              {settings.showSmsMessagePreview && clean && clean !== safeCode ? (
-                                <TouchableOpacity
-                                  style={s.mncBubbleBody}
-                                  onPress={() =>
-                                    handleCopy(
-                                      clean,
-                                      `msg-${numId}-${idx}`,
-                                      'Full SMS message copied!'
-                                    )
-                                  }
-                                  activeOpacity={0.7}
+                      return (
+                        <View style={s.mncMessagesWrapper}>
+                          <ScrollView
+                            style={s.mncMessagesScroll}
+                            contentContainerStyle={{ gap: 10 }}
+                            nestedScrollEnabled
+                            showsVerticalScrollIndicator={num.otps.length > 2}
+                          >
+                            {displayedOtps.map((otp, idx) => {
+                              const isOtpCopied = copiedKey === `otp-${numId}-${idx}`;
+                              const isMsgCopied = copiedKey === `msg-${numId}-${idx}`;
+                              const clean = cleanMessage(otp.message || otp.code);
+                              const safeCode = extractOtpCode(otp.code, otp.message);
+                              return (
+                                <View
+                                  key={`otp-${idx}-${otp.receivedAt || ''}`}
+                                  style={[
+                                    s.mncMessageBubble,
+                                    {
+                                      backgroundColor: colors.isDark
+                                        ? 'rgba(255,255,255,0.04)'
+                                        : 'rgba(15, 23, 42, 0.035)',
+                                    },
+                                  ]}
                                 >
-                                  <Text
-                                    style={[
-                                      s.mncText,
-                                      {
-                                        color: isMsgCopied
-                                          ? '#10B981'
-                                          : colors.textMuted,
-                                      },
-                                    ]}
+                                  {/* Tap Code Header to Copy Verification Code */}
+                                  <TouchableOpacity
+                                    style={s.mncBubbleHeader}
+                                    onPress={() =>
+                                      handleCopy(
+                                        safeCode,
+                                        `otp-${numId}-${idx}`,
+                                        `Code ${safeCode} copied!`
+                                      )
+                                    }
+                                    activeOpacity={0.7}
                                   >
-                                    {clean}
-                                  </Text>
-                                </TouchableOpacity>
-                              ) : null}
-                            </View>
-                          );
-                        })}
-                      </ScrollView>
+                                    <Text
+                                      style={s.mncCode}
+                                      numberOfLines={1}
+                                      adjustsFontSizeToFit
+                                    >
+                                      {safeCode}
+                                    </Text>
+                                    <View style={s.copyActionWrap}>
+                                      {isOtpCopied ? (
+                                        <Check size={15} color="#10B981" />
+                                      ) : (
+                                        <Copy size={15} color={colors.textMuted} />
+                                      )}
+                                    </View>
+                                  </TouchableOpacity>
 
-                      {num.otps.length > 3 && (
-                        <TouchableOpacity
-                          onPress={() => {
-                            triggerHaptic('selection');
-                            setExpandedCardIds((prev) => ({
-                              ...prev,
-                              [numId]: !prev[numId],
-                            }));
-                          }}
-                          style={s.moreMessagesToggle}
-                        >
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>
-                            {expandedCardIds[numId]
-                              ? 'Show latest 3 messages'
-                              : `View all ${num.otps.length} messages (${num.otps.length - 3} more)`}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
+                                  {/* Tap Message Text to Copy Full SMS Message (Matches Web NumberCard.tsx!) */}
+                                  {settings.showSmsMessagePreview && clean && clean !== safeCode ? (
+                                    <TouchableOpacity
+                                      style={s.mncBubbleBody}
+                                      onPress={() =>
+                                        handleCopy(
+                                          clean,
+                                          `msg-${numId}-${idx}`,
+                                          'Full SMS message copied!'
+                                        )
+                                      }
+                                      activeOpacity={0.7}
+                                    >
+                                      <Text
+                                        style={[
+                                          s.mncText,
+                                          {
+                                            color: isMsgCopied
+                                              ? '#10B981'
+                                              : colors.textMuted,
+                                          },
+                                        ]}
+                                      >
+                                        {clean}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  ) : null}
+                                </View>
+                              );
+                            })}
+                          </ScrollView>
+
+                          {num.otps.length > 3 && (
+                            <TouchableOpacity
+                              onPress={() => {
+                                triggerHaptic('selection');
+                                setExpandedCardIds((prev) => ({
+                                  ...prev,
+                                  [numId]: !prev[numId],
+                                }));
+                              }}
+                              style={s.moreMessagesToggle}
+                            >
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>
+                                {expandedCardIds[numId]
+                                  ? 'Show latest 3 messages'
+                                  : `View all ${num.otps.length} messages (${num.otps.length - 3} older)`}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      );
+                    })()
                   ) : (
                     <View style={s.mncNoMessages}>
                       {!isHistory ? (

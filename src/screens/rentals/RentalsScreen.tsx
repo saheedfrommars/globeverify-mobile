@@ -171,8 +171,9 @@ const RentalThreadsListView: React.FC<{
   const loadThreads = useCallback(async () => {
     if (!isVoip) {
       // For Non-VoIP: Group received OTPs by sender (e.g. WhatsApp, Telegram, etc.)
+      // Reversed so newest message defines the thread preview and appears first
       const grouped: Record<string, ChatThread> = {};
-      (rental.otps || []).forEach((o) => {
+      [...(rental.otps || [])].reverse().forEach((o) => {
         const sender = o.sender || rental.serviceName || 'Verification Service';
         if (!grouped[sender]) {
           grouped[sender] = {
