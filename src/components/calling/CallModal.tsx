@@ -7,6 +7,8 @@ import {
   StyleSheet,
   Modal,
   TouchableOpacity,
+  ScrollView,
+  Alert,
   Animated,
   Easing,
   Platform,
@@ -28,9 +30,13 @@ import {
   User,
   Grid3x3,
   Shield,
+  Trash2,
+  Clock,
+  ArrowUpRight,
 } from 'lucide-react-native';
 import { useCall } from '../../context/CallContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
+import { CallLogItem } from '../../services/callLogService';
 
 const DIALPAD_KEYS = [
   { digit: '1', sub: '' },
@@ -55,8 +61,10 @@ export const CallModal: React.FC = () => {
     isDialpadOpen,
     dialpadFromNumber,
     dialpadRentalId,
+    dialpadInitialTab,
     isMuted,
     isSpeaker,
+    callLogs,
     answerCall,
     rejectCall,
     hangupCall,
@@ -64,10 +72,15 @@ export const CallModal: React.FC = () => {
     closeDialpad,
     toggleMute,
     toggleSpeaker,
+    clearAllCallLogs,
+    deleteCallLog,
   } = useCall();
 
   const { colors } = useAppSettings();
   const isDark = colors.isDark;
+
+  // Segmented tab inside dialpad modal: 'keypad' | 'recents'
+  const [dialpadTab, setDialpadTab] = useState<'keypad' | 'recents'>('keypad');
 
   // Hidden WebRTC audio engine ref & URL
   const engineWebViewRef = useRef<any>(null);
@@ -75,6 +88,12 @@ export const CallModal: React.FC = () => {
 
   // In-call keypad toggle state (for DTMF tones)
   const [showInCallKeypad, setShowInCallKeypad] = useState(false);
+
+  useEffect(() => {
+    if (isDialpadOpen) {
+      setDialpadTab(dialpadInitialTab || 'keypad');
+    }
+  }, [isDialpadOpen, dialpadInitialTab]);
 
   useEffect(() => {
     if (callState === 'idle') {
@@ -120,6 +139,33 @@ export const CallModal: React.FC = () => {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  const formatLogDate = (timestamp: number) => {
+    const d = new Date(timestamp);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (isToday) {
+      return `Today, ${timeStr}`;
+    }
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) {
+      return `Yesterday, ${timeStr}`;
+    }
+    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${timeStr}`;
+  };
+
+  const formatLogDuration = (item: CallLogItem) => {
+    if (item.status === 'missed') return 'Missed';
+    if (item.status === 'rejected') return 'Declined';
+    if (item.status === 'failed') return 'Unanswered';
+    if (!item.duration || item.duration === 0) return '0s';
+    const m = Math.floor(item.duration / 60);
+    const s = item.duration % 60;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
   const handleKeyPress = (digit: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setDialedNumber((prev) => prev + digit);
@@ -137,10 +183,11 @@ export const CallModal: React.FC = () => {
     }
   };
 
-  const handleStartCall = async () => {
-    if (!dialedNumber.trim() || !dialpadRentalId) return;
+  const handleStartCall = async (targetNumber?: string) => {
+    const numToCall = targetNumber || dialedNumber;
+    if (!numToCall.trim() || !dialpadRentalId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    let num = dialedNumber.trim();
+    let num = numToCall.trim();
     if (!num.startsWith('+')) {
       num = '+' + num;
     }
@@ -210,11 +257,28 @@ export const CallModal: React.FC = () => {
     toggleSpeaker();
   };
 
+  const handleClearAllLogs = () => {
+    Alert.alert(
+      'Clear Call History',
+      'Are you sure you want to delete all call logs from local storage?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: () => {
+            clearAllCallLogs();
+          },
+        },
+      ]
+    );
+  };
+
   const isModalVisible = callState !== 'idle' || isDialpadOpen;
 
   if (!isModalVisible) return null;
 
-  // ── 1. DIALPAD BOTTOM SHEET ───────────────────────────────────────────────
+  // ── 1. DIALPAD & RECENTS BOTTOM SHEET ─────────────────────────────────────
   if (isDialpadOpen && callState === 'idle') {
     return (
       <Modal
@@ -236,14 +300,52 @@ export const CallModal: React.FC = () => {
             {/* Minimal Drag Indicator */}
             <View style={[s.handleBar, { backgroundColor: colors.border }]} />
 
-            {/* Header: Title + Subtitle & Close */}
-            <View style={s.sheetHeader}>
-              <View>
-                <Text style={[s.sheetTitle, { color: colors.text }]}>Keypad</Text>
-                <Text style={[s.sheetSubtitle, { color: colors.textMuted }]}>
-                  Calling as {dialpadFromNumber || 'Leased Number'}
-                </Text>
+            {/* Segmented Tab Switch: Keypad | Recents */}
+            <View style={s.topControlsRow}>
+              <View style={[s.segmentedPill, { backgroundColor: colors.surfaceSecondary }]}>
+                <TouchableOpacity
+                  style={[
+                    s.segmentBtn,
+                    dialpadTab === 'keypad' && [s.segmentBtnActive, { backgroundColor: colors.surface }],
+                  ]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    setDialpadTab('keypad');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      s.segmentText,
+                      { color: dialpadTab === 'keypad' ? colors.text : colors.textMuted },
+                    ]}
+                  >
+                    Keypad
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    s.segmentBtn,
+                    dialpadTab === 'recents' && [s.segmentBtnActive, { backgroundColor: colors.surface }],
+                  ]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    setDialpadTab('recents');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      s.segmentText,
+                      { color: dialpadTab === 'recents' ? colors.text : colors.textMuted },
+                    ]}
+                  >
+                    Recents{callLogs.length > 0 ? ` (${callLogs.length})` : ''}
+                  </Text>
+                </TouchableOpacity>
               </View>
+
               <TouchableOpacity
                 onPress={closeDialpad}
                 style={[s.sheetCloseBtn, { backgroundColor: colors.surfaceSecondary }]}
@@ -253,65 +355,190 @@ export const CallModal: React.FC = () => {
               </TouchableOpacity>
             </View>
 
-            {/* Large Floating Number Display */}
-            <View style={s.numberDisplayRow}>
-              <Text
-                style={[
-                  s.numberText,
-                  { color: dialedNumber ? colors.text : colors.textMuted },
-                ]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-              >
-                {dialedNumber || 'Enter number'}
-              </Text>
-              {dialedNumber.length > 0 && (
-                <TouchableOpacity
-                  onPress={handleBackspace}
-                  style={[s.backspaceBtn, { backgroundColor: colors.surfaceSecondary }]}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Delete size={20} color={colors.textSecondary} />
-                </TouchableOpacity>
-              )}
-            </View>
+            {dialpadTab === 'keypad' ? (
+              /* ─── KEYPAD VIEW ─────────────────────────────────────── */
+              <>
+                {/* Caller Line Info */}
+                <Text style={[s.sheetSubtitle, { color: colors.textMuted }]}>
+                  Calling as {dialpadFromNumber || 'Leased Number'}
+                </Text>
 
-            {/* 3x4 Clean Circular Dialpad Keys */}
-            <View style={s.keysGrid}>
-              {DIALPAD_KEYS.map((k) => (
-                <TouchableOpacity
-                  key={k.digit}
-                  style={[
-                    s.circularKey,
-                    {
-                      backgroundColor: colors.surfaceSecondary,
-                    },
-                  ]}
-                  onPress={() => handleKeyPress(k.digit)}
-                  activeOpacity={0.6}
-                >
-                  <Text style={[s.keyDigit, { color: colors.text }]}>{k.digit}</Text>
-                  {k.sub ? <Text style={[s.keySub, { color: colors.textMuted }]}>{k.sub}</Text> : null}
-                </TouchableOpacity>
-              ))}
-            </View>
+                {/* Large Floating Number Display */}
+                <View style={s.numberDisplayRow}>
+                  <Text
+                    style={[
+                      s.numberText,
+                      { color: dialedNumber ? colors.text : colors.textMuted },
+                    ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
+                    {dialedNumber || 'Enter number'}
+                  </Text>
+                  {dialedNumber.length > 0 && (
+                    <TouchableOpacity
+                      onPress={handleBackspace}
+                      style={[s.backspaceBtn, { backgroundColor: colors.surfaceSecondary }]}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Delete size={20} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
 
-            {/* Bottom Call Button */}
-            <View style={s.callActionArea}>
-              <TouchableOpacity
-                style={[
-                  s.callBtn,
-                  {
-                    opacity: dialedNumber.trim().length >= 3 ? 1 : 0.4,
-                  },
-                ]}
-                disabled={dialedNumber.trim().length < 3}
-                onPress={handleStartCall}
-                activeOpacity={0.8}
-              >
-                <Phone size={28} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
+                {/* 3x4 Clean Circular Dialpad Keys */}
+                <View style={s.keysGrid}>
+                  {DIALPAD_KEYS.map((k) => (
+                    <TouchableOpacity
+                      key={k.digit}
+                      style={[
+                        s.circularKey,
+                        {
+                          backgroundColor: colors.surfaceSecondary,
+                        },
+                      ]}
+                      onPress={() => handleKeyPress(k.digit)}
+                      activeOpacity={0.6}
+                    >
+                      <Text style={[s.keyDigit, { color: colors.text }]}>{k.digit}</Text>
+                      {k.sub ? <Text style={[s.keySub, { color: colors.textMuted }]}>{k.sub}</Text> : null}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Bottom Call Button */}
+                <View style={s.callActionArea}>
+                  <TouchableOpacity
+                    style={[
+                      s.callBtn,
+                      {
+                        opacity: dialedNumber.trim().length >= 3 ? 1 : 0.4,
+                      },
+                    ]}
+                    disabled={dialedNumber.trim().length < 3}
+                    onPress={() => handleStartCall()}
+                    activeOpacity={0.8}
+                  >
+                    <Phone size={28} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              /* ─── RECENTS VIEW ────────────────────────────────────── */
+              <View style={s.recentsContainer}>
+                {/* Recents Header Bar */}
+                <View style={s.recentsHeaderRow}>
+                  <Text style={[s.recentsTitle, { color: colors.text }]}>Call History</Text>
+                  {callLogs.length > 0 && (
+                    <TouchableOpacity
+                      onPress={handleClearAllLogs}
+                      style={[s.clearAllBtn, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : '#FEE2E2' }]}
+                      activeOpacity={0.7}
+                    >
+                      <Trash2 size={13} color="#EF4444" />
+                      <Text style={s.clearAllBtnText}>Clear All</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Call Logs List */}
+                {callLogs.length === 0 ? (
+                  <View style={s.emptyRecentsView}>
+                    <View style={[s.emptyIconCircle, { backgroundColor: colors.surfaceSecondary }]}>
+                      <Clock size={28} color={colors.textMuted} />
+                    </View>
+                    <Text style={[s.emptyTitle, { color: colors.text }]}>No Call History</Text>
+                    <Text style={[s.emptySubtitle, { color: colors.textMuted }]}>
+                      Your incoming and outgoing VoIP calls will be saved locally here.
+                    </Text>
+                  </View>
+                ) : (
+                  <ScrollView
+                    style={s.recentsList}
+                    contentContainerStyle={{ paddingBottom: 16 }}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {callLogs.map((log) => {
+                      const isOutbound = log.direction === 'outbound';
+                      const isMissed = log.status === 'missed' || log.status === 'rejected' || log.status === 'failed';
+
+                      return (
+                        <View
+                          key={log.id}
+                          style={[s.logItemRow, { borderBottomColor: colors.border }]}
+                        >
+                          {/* Direction Icon Badge */}
+                          <View
+                            style={[
+                              s.logIconCircle,
+                              {
+                                backgroundColor: isMissed
+                                  ? isDark ? 'rgba(239, 68, 68, 0.16)' : '#FEE2E2'
+                                  : isOutbound
+                                  ? isDark ? 'rgba(59, 130, 246, 0.16)' : '#EFF6FF'
+                                  : isDark ? 'rgba(16, 185, 129, 0.16)' : '#ECFDF5',
+                              },
+                            ]}
+                          >
+                            {isMissed ? (
+                              <PhoneOff size={16} color="#EF4444" />
+                            ) : isOutbound ? (
+                              <ArrowUpRight size={16} color={colors.primary} />
+                            ) : (
+                              <PhoneIncoming size={16} color="#10B981" />
+                            )}
+                          </View>
+
+                          {/* Caller Details */}
+                          <TouchableOpacity
+                            style={s.logDetailsCol}
+                            onPress={() => {
+                              setDialedNumber(log.remoteNumber);
+                              setDialpadTab('keypad');
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                s.logRemoteNumber,
+                                { color: isMissed ? '#EF4444' : colors.text },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {log.remoteNumber}
+                            </Text>
+                            <Text style={[s.logMetaText, { color: colors.textMuted }]}>
+                              {formatLogDate(log.timestamp)} • {formatLogDuration(log)}
+                            </Text>
+                          </TouchableOpacity>
+
+                          {/* Action Buttons: Quick Call & Delete */}
+                          <View style={s.logActionsRow}>
+                            <TouchableOpacity
+                              onPress={() => handleStartCall(log.remoteNumber)}
+                              style={[s.quickCallBtn, { backgroundColor: '#10B981' }]}
+                              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                              activeOpacity={0.8}
+                            >
+                              <Phone size={14} color="#FFFFFF" />
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => deleteCallLog(log.id)}
+                              style={[s.deleteLogBtn, { backgroundColor: colors.surfaceSecondary }]}
+                              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                              activeOpacity={0.7}
+                            >
+                              <Trash2 size={13} color={colors.textMuted} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+              </View>
+            )}
           </SafeAreaView>
         </View>
       </Modal>
@@ -810,32 +1037,51 @@ const s = StyleSheet.create({
   dialpadSheet: {
     borderTopLeftRadius: 34,
     borderTopRightRadius: 34,
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 24 : 32,
+    maxHeight: '85%',
   },
   handleBar: {
     width: 38,
     height: 4,
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  sheetHeader: {
+  topControlsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  sheetTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+  segmentedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 3,
+    borderRadius: 20,
+  },
+  segmentBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  segmentBtnActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   sheetSubtitle: {
     fontSize: 13,
     fontWeight: '500',
-    marginTop: 2,
+    textAlign: 'center',
+    marginBottom: 4,
   },
   sheetCloseBtn: {
     width: 32,
@@ -845,11 +1091,11 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   numberDisplayRow: {
-    minHeight: 64,
+    minHeight: 58,
     justifyContent: 'center',
     alignItems: 'center',
     flexDirection: 'row',
-    marginVertical: 12,
+    marginVertical: 8,
     paddingHorizontal: 20,
   },
   numberText: {
@@ -873,7 +1119,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     gap: 24,
     rowGap: 14,
-    marginBottom: 20,
+    marginBottom: 18,
     paddingHorizontal: 8,
   },
   circularKey: {
@@ -896,7 +1142,7 @@ const s = StyleSheet.create({
   callActionArea: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 4,
+    paddingTop: 2,
   },
   callBtn: {
     width: 70,
@@ -910,5 +1156,107 @@ const s = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 10,
     elevation: 6,
+  },
+  // ── Recents Tab Styles ───────────────────────────────────────────────────
+  recentsContainer: {
+    minHeight: 340,
+    maxHeight: 460,
+  },
+  recentsHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    marginBottom: 8,
+  },
+  recentsTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  clearAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  clearAllBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  recentsList: {
+    flex: 1,
+  },
+  logItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+  },
+  logIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logDetailsCol: {
+    flex: 1,
+    gap: 2,
+  },
+  logRemoteNumber: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  logMetaText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  logActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  quickCallBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteLogBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyRecentsView: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    gap: 8,
+  },
+  emptyIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  emptySubtitle: {
+    fontSize: 13,
+    textAlign: 'center',
+    maxWidth: 240,
+    lineHeight: 18,
   },
 });

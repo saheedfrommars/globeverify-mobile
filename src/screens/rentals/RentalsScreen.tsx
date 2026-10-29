@@ -364,7 +364,7 @@ const RentalConversationChatView: React.FC<{
   recipient: string | null;
   isComposingNew: boolean;
   onBack: () => void;
-  openDialpad: (id: string, num: string) => void;
+  openDialpad: (id: string, num: string, initialTab?: 'keypad' | 'recents') => void;
   onSelectRecipient: (num: string) => void;
 }> = ({
   rental,
@@ -1271,12 +1271,27 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                             style={s.blueActionBtn}
                             onPress={() => {
                               triggerHaptic('medium');
-                              openDialpad(rental.id, rental.phoneNumber);
+                              openDialpad(rental.id, rental.phoneNumber, 'keypad');
                             }}
                             activeOpacity={0.8}
                           >
                             <Phone size={13} color="#FFFFFF" />
                             <Text style={s.blueActionBtnText}>Call</Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {/* Call Logs button: ONLY FOR VOIP NUMBERS! */}
+                        {isVoip && (
+                          <TouchableOpacity
+                            style={[s.outlineActionBtn, { borderColor: colors.border }]}
+                            onPress={() => {
+                              triggerHaptic('selection');
+                              openDialpad(rental.id, rental.phoneNumber, 'recents');
+                            }}
+                            activeOpacity={0.8}
+                          >
+                            <Clock size={13} color={colors.textSecondary} />
+                            <Text style={[s.outlineActionBtnText, { color: colors.textSecondary }]}>Logs</Text>
                           </TouchableOpacity>
                         )}
 

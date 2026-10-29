@@ -12,6 +12,7 @@ import * as Haptics from 'expo-haptics';
 import apiClient from '../api/client';
 import { socketService } from '../services/socketService';
 import { onIncomingCallReceived } from '../services/pushNotificationService';
+import { callLogService, CallLogItem } from '../services/callLogService';
 import { useAuth } from './AuthContext';
 
 export type CallState =
@@ -40,8 +41,10 @@ interface CallContextType {
   isDialpadOpen: boolean;
   dialpadFromNumber: string | null;
   dialpadRentalId: string | null;
+  dialpadInitialTab: 'keypad' | 'recents';
   isMuted: boolean;
   isSpeaker: boolean;
+  callLogs: CallLogItem[];
   answerCall: () => Promise<void>;
   rejectCall: () => Promise<void>;
   hangupCall: () => Promise<void>;
@@ -50,10 +53,12 @@ interface CallContextType {
     fromNumber: string,
     toNumber: string
   ) => Promise<boolean>;
-  openDialpad: (rentalId?: string, defaultFrom?: string) => void;
+  openDialpad: (rentalId?: string, defaultFrom?: string, initialTab?: 'keypad' | 'recents') => void;
   closeDialpad: () => void;
   toggleMute: () => void;
   toggleSpeaker: () => void;
+  clearAllCallLogs: () => Promise<void>;
+  deleteCallLog: (id: string) => Promise<void>;
 }
 
 const CallContext = createContext<CallContextType | undefined>(undefined);
@@ -67,11 +72,67 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isDialpadOpen, setIsDialpadOpen] = useState<boolean>(false);
   const [dialpadFromNumber, setDialpadFromNumber] = useState<string | null>(null);
   const [dialpadRentalId, setDialpadRentalId] = useState<string | null>(null);
+  const [dialpadInitialTab, setDialpadInitialTab] = useState<'keypad' | 'recents'>('keypad');
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isSpeaker, setIsSpeaker] = useState<boolean>(false);
+  const [callLogs, setCallLogs] = useState<CallLogItem[]>([]);
 
   const durationTimerRef = useRef<any>(null);
   const ringVibrationTimerRef = useRef<any>(null);
+
+  const currentCallRef = useRef<ActiveCallData | null>(null);
+  const callDurationRef = useRef<number>(0);
+  const callStateRef = useRef<CallState>('idle');
+  const loggedCallControls = useRef<Set<string>>(new Set());
+
+  currentCallRef.current = currentCall;
+  callDurationRef.current = callDuration;
+  callStateRef.current = callState;
+
+  // Load call logs from AsyncStorage and listen to updates
+  useEffect(() => {
+    callLogService.getLogs().then(setCallLogs);
+    const unsubLogs = callLogService.subscribe(setCallLogs);
+    return () => {
+      unsubLogs();
+    };
+  }, []);
+
+  const recordCallLog = useCallback(
+    (statusOverride?: 'completed' | 'missed' | 'rejected' | 'failed') => {
+      const c = currentCallRef.current;
+      if (!c) return;
+
+      const dedupeKey = `${c.callControlId || ''}_${c.phoneNumber}_${c.remoteNumber}_${c.direction}_${Math.floor(Date.now() / 15000)}`;
+      if (loggedCallControls.current.has(dedupeKey)) return;
+      loggedCallControls.current.add(dedupeKey);
+
+      const duration = callDurationRef.current;
+      const state = callStateRef.current;
+
+      let status: 'completed' | 'missed' | 'rejected' | 'failed' = 'completed';
+      if (statusOverride) {
+        status = statusOverride;
+      } else if (state === 'ringing_inbound') {
+        status = 'missed';
+      } else if (state === 'calling_outbound' && duration === 0) {
+        status = 'failed';
+      } else if (duration > 0 || state === 'connected') {
+        status = 'completed';
+      }
+
+      callLogService.saveLog({
+        callControlId: c.callControlId,
+        phoneNumber: c.phoneNumber,
+        remoteNumber: c.remoteNumber,
+        direction: c.direction,
+        status,
+        duration,
+        rentalId: c.rentalId,
+      });
+    },
+    []
+  );
 
   // ── Clean up call duration timer ─────────────────────────────────────────
   const stopDurationTimer = useCallback(() => {
@@ -146,6 +207,7 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const unsubSocketEnded = socketService.subscribe('call_ended', () => {
       stopRingVibration();
       stopDurationTimer();
+      recordCallLog();
       setCallState('ended');
       setTimeout(() => {
         setCallState('idle');
@@ -168,6 +230,7 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, [
     handleIncomingCallEvent,
+    recordCallLog,
     startDurationTimer,
     stopDurationTimer,
     stopRingVibration,
@@ -197,6 +260,7 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const rejectCall = async () => {
     stopRingVibration();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+    recordCallLog('rejected');
     const rId = currentCall?.rentalId;
     const cId = currentCall?.callControlId;
 
@@ -217,6 +281,7 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const hangupCall = async () => {
     stopRingVibration();
     stopDurationTimer();
+    recordCallLog();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
 
     const rId = currentCall?.rentalId;
@@ -273,11 +338,13 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         );
         return true;
       } else {
+        recordCallLog('failed');
         setCallState('idle');
         setCurrentCall(null);
         return false;
       }
     } catch (err: any) {
+      recordCallLog('failed');
       const errMsg = err?.response?.data?.message || err?.message || 'Outbound call failed';
       Alert.alert('Call Failed', errMsg);
       console.warn('[CallContext] Outbound call error:', errMsg);
@@ -287,9 +354,14 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const openDialpad = (rentalId?: string, defaultFrom?: string) => {
+  const openDialpad = (
+    rentalId?: string,
+    defaultFrom?: string,
+    initialTab: 'keypad' | 'recents' = 'keypad'
+  ) => {
     setDialpadRentalId(rentalId || null);
     setDialpadFromNumber(defaultFrom || null);
+    setDialpadInitialTab(initialTab);
     setIsDialpadOpen(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
   };
@@ -308,6 +380,16 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
   };
 
+  const clearAllCallLogs = async () => {
+    await callLogService.clearAllLogs();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  };
+
+  const deleteCallLog = async (id: string) => {
+    await callLogService.deleteLog(id);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+  };
+
   return (
     <CallContext.Provider
       value={{
@@ -317,8 +399,10 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isDialpadOpen,
         dialpadFromNumber,
         dialpadRentalId,
+        dialpadInitialTab,
         isMuted,
         isSpeaker,
+        callLogs,
         answerCall,
         rejectCall,
         hangupCall,
@@ -327,6 +411,8 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         closeDialpad,
         toggleMute,
         toggleSpeaker,
+        clearAllCallLogs,
+        deleteCallLog,
       }}
     >
       {children}
