@@ -13,9 +13,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Path, Ellipse, G, Defs, LinearGradient, Stop } from 'react-native-svg';
-import { ArrowLeft, Shield } from 'lucide-react-native';
+import { ArrowLeft, Shield, Moon, Sun } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../theme';
+import { useAppSettings } from '../../context/WalletSettingsContext';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -32,7 +33,9 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
   subtitle,
   onBack,
 }) => {
-  const { colors, spacing, typography, isDark } = useTheme();
+  const { spacing, typography } = useTheme();
+  const { settings, toggleTheme } = useAppSettings();
+  const isDark = settings.themeMode === 'dark';
   const insets = useSafeAreaInsets();
 
   const handleBack = () => {
@@ -140,7 +143,25 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
               />
             </View>
 
-            <View style={{ width: 40 }} />
+            {/* Top-Right Theme Toggle Button */}
+            <TouchableOpacity
+              onPress={toggleTheme}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={[
+                styles.themeBtn,
+                {
+                  backgroundColor: themeColors.surface,
+                  borderColor: themeColors.border,
+                },
+              ]}
+              activeOpacity={0.7}
+            >
+              {isDark ? (
+                <Sun size={17} color="#FBBF24" />
+              ) : (
+                <Moon size={17} color={themeColors.text} />
+              )}
+            </TouchableOpacity>
           </View>
 
           {/* ── Header Title & Subtitle ── */}
@@ -163,8 +184,8 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
 
           {/* ── Footer Trust Guarantee ── */}
           <View style={styles.footer}>
-            <Shield size={13} color={colors.textTertiary} />
-            <Text style={[typography.caption1, { color: colors.textTertiary, textAlign: 'center' }]}>
+            <Shield size={13} color={themeColors.textSecondary} />
+            <Text style={[typography.caption1, { color: themeColors.textSecondary, textAlign: 'center' }]}>
               GlobeVerify Telecom • 256-Bit TLS Encrypted
             </Text>
           </View>
@@ -192,6 +213,18 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  themeBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,

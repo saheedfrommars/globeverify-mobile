@@ -15,6 +15,7 @@ import {
   PanResponder,
   Linking,
   Dimensions,
+  Easing,
 } from 'react-native';
 import {
   MessageCircle,
@@ -175,6 +176,57 @@ const NativeMarkdownMessage: React.FC<{
           </Text>
         );
       })}
+    </View>
+  );
+};
+
+const TypingDotsIndicator: React.FC<{ dotColor: string }> = ({ dotColor }) => {
+  const dot1 = useRef(new Animated.Value(0)).current;
+  const dot2 = useRef(new Animated.Value(0)).current;
+  const dot3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animateDot = (anim: Animated.Value, delay: number) => {
+      return Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(anim, {
+            toValue: -5,
+            duration: 280,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(anim, {
+            toValue: 0,
+            duration: 280,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.delay(560 - delay),
+        ])
+      );
+    };
+
+    const a1 = animateDot(dot1, 0);
+    const a2 = animateDot(dot2, 180);
+    const a3 = animateDot(dot3, 360);
+
+    a1.start();
+    a2.start();
+    a3.start();
+
+    return () => {
+      a1.stop();
+      a2.stop();
+      a3.stop();
+    };
+  }, [dot1, dot2, dot3]);
+
+  return (
+    <View style={s.typingDotsRow}>
+      <Animated.View style={[s.typingDot, { backgroundColor: dotColor, transform: [{ translateY: dot1 }] }]} />
+      <Animated.View style={[s.typingDot, { backgroundColor: dotColor, transform: [{ translateY: dot2 }] }]} />
+      <Animated.View style={[s.typingDot, { backgroundColor: dotColor, transform: [{ translateY: dot3 }] }]} />
     </View>
   );
 };
@@ -781,16 +833,16 @@ export const VeraSupportChat: React.FC = () => {
                     {isTyping && (
                       <View style={[s.bubbleRow, s.bubbleRowAssistant]}>
                         <View style={[s.bubbleAvatar, { backgroundColor: colors.primary }]}>
-                          <Bot size={12} color="#FFFFFF" />
+                          <Bot size={13} color="#FFFFFF" />
                         </View>
                         <View
                           style={[
                             s.typingBubble,
-                            { backgroundColor: colors.bg, borderColor: colors.border },
+                            { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
                           ]}
                         >
-                          <ActivityIndicator size="small" color={colors.primary} />
-                          <Text style={{ fontSize: 12, color: colors.textMuted }}>
+                          <TypingDotsIndicator dotColor={colors.primary} />
+                          <Text style={{ fontSize: 12, color: colors.textMuted, fontWeight: '500' }}>
                             Vera is typing…
                           </Text>
                         </View>
@@ -1145,6 +1197,18 @@ const s = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 14,
     borderWidth: 1,
+  },
+  typingDotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4.5,
+    height: 16,
+    paddingRight: 2,
+  },
+  typingDot: {
+    width: 6.5,
+    height: 6.5,
+    borderRadius: 3.25,
   },
   inputArea: {
     flexDirection: 'row',
