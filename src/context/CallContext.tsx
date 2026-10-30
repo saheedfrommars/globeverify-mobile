@@ -352,22 +352,7 @@ export const CallProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
       setCurrentCall(newCall);
       setCallState('calling_outbound');
-
-      const res = await apiClient.post(`/numbers/rentals/${rentalId}/call`, {
-        to: toNumber,
-      });
-
-      if (res.data?.success && res.data?.callControlId) {
-        setCurrentCall((prev) =>
-          prev ? { ...prev, callControlId: res.data.callControlId } : null
-        );
-        return true;
-      } else {
-        recordCallLog('failed');
-        setCallState('idle');
-        setCurrentCall(null);
-        return false;
-      }
+      return true;
     } catch (err: any) {
       recordCallLog('failed');
       const errMsg = err?.response?.data?.message || err?.message || 'Outbound call failed';

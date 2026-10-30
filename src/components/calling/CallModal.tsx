@@ -107,7 +107,7 @@ export const CallModal: React.FC = () => {
         .then((res) => {
           const token = res.data?.token || '';
           if (token) {
-            const url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(currentCall.phoneNumber || '')}&rentalId=${currentCall.rentalId}&mode=engine`;
+            const url = `https://www.globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(currentCall.phoneNumber || '')}&rentalId=${currentCall.rentalId}&mode=engine`;
             setEngineUrl(url);
           }
         })
@@ -215,7 +215,7 @@ export const CallModal: React.FC = () => {
       const res = await apiClient.get(`/numbers/rentals/${rentalId}/voice-token`);
       const token = res.data?.token || '';
       if (token) {
-        const url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(fromNum)}&rentalId=${rentalId}&to=${encodeURIComponent(num)}&mode=engine`;
+        const url = `https://www.globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(fromNum)}&rentalId=${rentalId}&to=${encodeURIComponent(num)}&mode=engine`;
         setEngineUrl(url);
       }
     } catch (e: any) {
@@ -235,7 +235,7 @@ export const CallModal: React.FC = () => {
         const res = await apiClient.get(`/numbers/rentals/${rentalId}/voice-token`);
         const token = res.data?.token || '';
         if (token) {
-          const url = `https://globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(currentCall?.phoneNumber || '')}&rentalId=${rentalId}&mode=engine`;
+          const url = `https://www.globeverify.com/call?token=${encodeURIComponent(token)}&from=${encodeURIComponent(currentCall?.phoneNumber || '')}&rentalId=${rentalId}&mode=engine`;
           setEngineUrl(url);
         }
       } catch (e: any) {
@@ -638,6 +638,61 @@ export const CallModal: React.FC = () => {
               <Text style={[s.actionBtnLabel, { color: colors.textMuted }]}>Answer</Text>
             </View>
           </View>
+
+          {/* Pre-warmed WebRTC Engine during inbound ringing */}
+          {engineUrl && (
+            <HeadlessWebView
+              ref={engineWebViewRef}
+              source={{ uri: engineUrl }}
+              containerStyle={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                width: 10,
+                height: 10,
+                opacity: 1,
+                zIndex: -1,
+              }}
+              style={{
+                width: 10,
+                height: 10,
+                opacity: 1,
+              }}
+              scrollEnabled={false}
+              bounces={false}
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+              overScrollMode="never"
+              pointerEvents="none"
+              javaScriptEnabled
+              domStorageEnabled
+              mediaPlaybackRequiresUserAction={false}
+              allowsInlineMediaPlayback={true}
+              mediaCapturePermissionGrantType="grant"
+              androidLayerType="hardware"
+              originWhitelist={['*']}
+              onPermissionRequest={(event: any) => {
+                try {
+                  if (event?.request?.grant) {
+                    event.request.grant(event.request.getResources?.() || event.resources || []);
+                  }
+                } catch (e) {
+                  console.warn('[CallModal] onPermissionRequest grant error:', e);
+                }
+              }}
+              onLoadEnd={() => {
+                engineWebViewRef.current?.injectJavaScript('if (window.callEngineAnswer) { window.callEngineAnswer(); } true;');
+              }}
+              onMessage={(e: any) => {
+                try {
+                  const msg = JSON.parse(e.nativeEvent.data);
+                  if (msg.type === 'call_state' && msg.state === 'destroy') {
+                    handleHangup();
+                  }
+                } catch (err) {}
+              }}
+            />
+          )}
         </SafeAreaView>
       </Modal>
     );
@@ -843,15 +898,15 @@ export const CallModal: React.FC = () => {
               position: 'absolute',
               bottom: 0,
               right: 0,
-              width: 2,
-              height: 2,
-              opacity: 0.01,
+              width: 10,
+              height: 10,
+              opacity: 1,
               zIndex: -1,
             }}
             style={{
-              width: 2,
-              height: 2,
-              opacity: 0.01,
+              width: 10,
+              height: 10,
+              opacity: 1,
             }}
             scrollEnabled={false}
             bounces={false}
