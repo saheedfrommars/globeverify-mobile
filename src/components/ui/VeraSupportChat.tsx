@@ -16,7 +16,10 @@ import {
   Linking,
   Dimensions,
   Easing,
+  Keyboard,
+  LayoutAnimation,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   MessageCircle,
   X,
@@ -253,6 +256,44 @@ export const VeraSupportChat: React.FC = () => {
   const scrollRef = useRef<any>(null);
   const isOpenRef = useRef(false);
   const isMinimizedRef = useRef(false);
+
+  const insets = useSafeAreaInsets();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  const handleClose = useCallback(() => {
+    Keyboard.dismiss();
+    setIsOpen(false);
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const onShow = (e: any) => {
+      if (Platform.OS === 'ios') {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      }
+      setKeyboardHeight(e.endCoordinates.height);
+      setTimeout(() => {
+        scrollRef.current?.scrollToEnd?.({ animated: true });
+      }, 100);
+    };
+
+    const onHide = () => {
+      if (Platform.OS === 'ios') {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      }
+      setKeyboardHeight(0);
+    };
+
+    const showSub = Keyboard.addListener(showEvent, onShow);
+    const hideSub = Keyboard.addListener(hideEvent, onHide);
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Draggable FAB position
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
@@ -547,19 +588,48 @@ export const VeraSupportChat: React.FC = () => {
           visible={true}
           transparent
           animationType="fade"
-          onRequestClose={() => setIsOpen(false)}
+          onRequestClose={handleClose}
         >
-          <KeyboardAvoidingView
-            style={s.modalBackdrop}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          <View
+            style={[
+              s.modalBackdrop,
+              {
+                paddingBottom:
+                  keyboardHeight > 0
+                    ? keyboardHeight + (Platform.OS === 'ios' ? 10 : 6)
+                    : Platform.OS === 'ios'
+                    ? Math.max(insets.bottom, 24)
+                    : 16,
+              },
+            ]}
           >
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => setIsOpen(false)} />
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => {
+                if (keyboardHeight > 0) {
+                  Keyboard.dismiss();
+                } else {
+                  handleClose();
+                }
+              }}
+            />
 
             <View
               style={[
                 s.panel,
                 isMinimized && s.panelMinimized,
                 {
+                  height: isMinimized
+                    ? 64
+                    : keyboardHeight > 0
+                    ? Math.min(
+                        SCREEN_HEIGHT -
+                          keyboardHeight -
+                          insets.top -
+                          (Platform.OS === 'ios' ? 32 : 24),
+                        480
+                      )
+                    : Math.min(560, SCREEN_HEIGHT * 0.76),
                   backgroundColor: colors.surface,
                   borderColor: colors.border,
                 },
@@ -613,7 +683,7 @@ export const VeraSupportChat: React.FC = () => {
                   <TouchableOpacity
                     style={[s.headerIconBtn, { backgroundColor: colors.surfaceSecondary }]}
                     onPress={() => {
-                      setIsOpen(false);
+                      handleClose();
                       setActiveScreen('support');
                     }}
                   >
@@ -642,7 +712,7 @@ export const VeraSupportChat: React.FC = () => {
 
                   <TouchableOpacity
                     style={[s.headerIconBtn, { backgroundColor: 'rgba(239,68,68,0.12)' }]}
-                    onPress={() => setIsOpen(false)}
+                    onPress={handleClose}
                   >
                     <X size={15} color="#EF4444" />
                   </TouchableOpacity>
@@ -875,6 +945,11 @@ export const VeraSupportChat: React.FC = () => {
                       onChangeText={setInputValue}
                       editable={isConnected}
                       multiline
+                      onFocus={() => {
+                        setTimeout(() => {
+                          scrollRef.current?.scrollToEnd?.({ animated: true });
+                        }, 120);
+                      }}
                     />
                     <TouchableOpacity
                       style={[
@@ -893,22 +968,24 @@ export const VeraSupportChat: React.FC = () => {
                     </TouchableOpacity>
                   </View>
 
-                  <Text
-                    style={[
-                      s.footerNote,
-                      {
-                        color: colors.textMuted,
-                        backgroundColor: colors.surface,
-                        borderTopColor: colors.border,
-                      },
-                    ]}
-                  >
-                    Powered by Vera · GlobeVerify AI Support
-                  </Text>
+                  {keyboardHeight === 0 && (
+                    <Text
+                      style={[
+                        s.footerNote,
+                        {
+                          color: colors.textMuted,
+                          backgroundColor: colors.surface,
+                          borderTopColor: colors.border,
+                        },
+                      ]}
+                    >
+                      Powered by Vera · GlobeVerify AI Support
+                    </Text>
+                  )}
                 </>
               )}
             </View>
-          </KeyboardAvoidingView>
+          </View>
         </Modal>
       )}
     </>
@@ -965,11 +1042,9 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
     justifyContent: 'flex-end',
     paddingHorizontal: 12,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 16,
   },
   panel: {
     width: '100%',
-    height: Math.min(560, SCREEN_HEIGHT * 0.76),
     borderRadius: 20,
     borderWidth: 1,
     overflow: 'hidden',
