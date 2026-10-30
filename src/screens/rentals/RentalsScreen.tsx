@@ -790,7 +790,9 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   const [activeRentals, setActiveRentals] = useState<ActiveRental[]>([]);
-  const [availableNumbers, setAvailableNumbers] = useState<AvailableRentalItem[]>([]);
+  const [nonVoipCatalog, setNonVoipCatalog] = useState<AvailableRentalItem[]>([]);
+  const [voipCatalog, setVoipCatalog] = useState<AvailableRentalItem[]>([]);
+  const currentCatalog = lineType === 'non_voip' ? nonVoipCatalog : voipCatalog;
   const [selectedCountry, setSelectedCountry] = useState<RentalCountry>(RENTAL_COUNTRIES[0]);
 
   const [loading, setLoading] = useState(true);
@@ -847,7 +849,11 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
           if (cached) {
             const parsed = JSON.parse(cached);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setAvailableNumbers(parsed);
+              if (currentLineType === 'non_voip') {
+                setNonVoipCatalog(parsed);
+              } else {
+                setVoipCatalog(parsed);
+              }
             }
           }
         } catch {}
@@ -876,23 +882,41 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                 ? currentLineType === 'non_voip' ? 15000 : 9800
                 : currentLineType === 'non_voip' ? 10.0 : 6.5),
           }));
-          setAvailableNumbers(normalized);
+
+          if (currentLineType === 'non_voip') {
+            setNonVoipCatalog(normalized);
+          } else {
+            setVoipCatalog(normalized);
+          }
 
           // Save to local offline cache
           try {
             await AsyncStorage.setItem(cacheKey, JSON.stringify(normalized));
           } catch {}
         } else {
-          setAvailableNumbers([]);
+          if (currentLineType === 'non_voip') {
+            setNonVoipCatalog([]);
+          } else {
+            setVoipCatalog([]);
+          }
         }
       } catch (err: any) {
         console.warn('[Rentals Catalog] Live fetch error:', err?.message);
-        setAvailableNumbers((prev) => {
-          if (prev.length === 0) {
-            setCatalogError('Could not load live inventory. Please check your network and tap to retry.');
-          }
-          return prev;
-        });
+        if (currentLineType === 'non_voip') {
+          setNonVoipCatalog((prev) => {
+            if (prev.length === 0) {
+              setCatalogError('Could not load physical SIM services. Tap to retry.');
+            }
+            return prev;
+          });
+        } else {
+          setVoipCatalog((prev) => {
+            if (prev.length === 0) {
+              setCatalogError('Could not load virtual numbers. Tap to retry.');
+            }
+            return prev;
+          });
+        }
       } finally {
         setLoadingCatalog(false);
       }
@@ -1028,13 +1052,25 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
     });
   };
 
-  const filteredCatalog = useMemo(() => {
-    if (lineType !== 'non_voip') return availableNumbers;
+  const TOP_POPULAR_KEYWORDS = useMemo(
+    () => [
+      'full', 'whatsapp', 'cash', 'telegram', 'google', 'gmail', 'paypal',
+      'coinbase', 'apple', 'instagram', 'tiktok', 'tinder', 'facebook',
+      'twitter', 'amazon', 'netflix', 'uber', 'chime', 'venmo', 'discord',
+      'snapchat', 'linkedin', 'steam', 'openai', 'chatgpt',
+    ],
+    []
+  );
 
-    let items = availableNumbers;
+  const filteredCatalog = useMemo(() => {
+    if (lineType === 'voip') {
+      return voipCatalog;
+    }
+
+    let items = nonVoipCatalog;
 
     if (selectedCategory === 'full') {
-      items = items.filter((i) => i.isFullAccess);
+      return items.filter((i) => i.isFullAccess);
     } else if (selectedCategory === 'whatsapp') {
       items = items.filter((i) => (i.serviceName || i.service || '').toLowerCase().includes('whatsapp'));
     } else if (selectedCategory === 'cash app') {
@@ -1071,13 +1107,40 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
       );
     }
 
-    if (!serviceSearch.trim()) return items;
-    const q = serviceSearch.toLowerCase().trim();
-    return items.filter((i) => {
-      const text = (i.serviceName || i.service || '').toLowerCase();
-      return text.includes(q);
-    });
-  }, [availableNumbers, lineType, selectedCategory, serviceSearch]);
+    // If searching, search across all 2,000+ items and return up to 30 matches
+    if (serviceSearch.trim()) {
+      const q = serviceSearch.toLowerCase().trim();
+      return items
+        .filter((i) => {
+          const text = (i.serviceName || i.service || '').toLowerCase();
+          return text.includes(q);
+        })
+        .slice(0, 30);
+    }
+
+    // Default "All Services" view: Show top 25 popular services to prevent freeze/lag/crash
+    if (selectedCategory === 'all') {
+      const popularMatches: AvailableRentalItem[] = [];
+      const fullItem = items.find((i) => i.isFullAccess);
+      if (fullItem) popularMatches.push(fullItem);
+
+      for (const kw of TOP_POPULAR_KEYWORDS) {
+        if (kw === 'full') continue;
+        const found = items.find((i) => {
+          if (i.isFullAccess) return false;
+          const name = (i.serviceName || i.service || '').toLowerCase();
+          return name.includes(kw);
+        });
+        if (found && !popularMatches.some((m) => m.serviceId === found.serviceId)) {
+          popularMatches.push(found);
+        }
+      }
+
+      return popularMatches.length > 0 ? popularMatches.slice(0, 25) : items.slice(0, 25);
+    }
+
+    return items.slice(0, 30);
+  }, [lineType, voipCatalog, nonVoipCatalog, selectedCategory, serviceSearch, TOP_POPULAR_KEYWORDS]);
 
   const handleSelectNavTab = (nav: NavTabId) => {
     if (nav === 'home') onNavigateToHome?.();
@@ -1375,12 +1438,9 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                   style={[
                     s.stackedLineCard,
                     {
-                      backgroundColor:
-                        lineType === 'non_voip'
-                          ? (colors.isDark ? '#0F2318' : '#F0FDF4')
-                          : colors.surface,
-                      borderColor:
-                        lineType === 'non_voip' ? '#16A34A' : colors.border,
+                      backgroundColor: colors.surface,
+                      borderColor: lineType === 'non_voip' ? colors.primary : colors.border,
+                      borderWidth: lineType === 'non_voip' ? 1.5 : 1,
                     },
                     lineType === 'non_voip' && s.stackedLineCardActive,
                   ]}
@@ -1392,37 +1452,34 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                         {
                           backgroundColor:
                             lineType === 'non_voip'
-                              ? '#16A34A'
+                              ? colors.primarySoft
                               : (colors.isDark ? '#27272A' : '#F4F4F5'),
                         },
                       ]}
                     >
                       <Smartphone
                         size={22}
-                        color={lineType === 'non_voip' ? '#FFFFFF' : colors.textMuted}
+                        color={lineType === 'non_voip' ? colors.primary : colors.textMuted}
                       />
                     </View>
 
                     <View style={{ flex: 1, gap: 4 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <Text style={[s.stackedCardTitle, { color: colors.text }]}>
-                          Non-VoIP Physical SIM
+                          Non-VoIP Physical SIMs
                         </Text>
                         <View
                           style={[
                             s.pillBadge,
                             {
-                              backgroundColor:
-                                lineType === 'non_voip'
-                                  ? 'rgba(22, 163, 74, 0.18)'
-                                  : colors.primarySoft,
+                              backgroundColor: colors.primarySoft,
                             },
                           ]}
                         >
                           <Text
                             style={[
                               s.pillBadgeText,
-                              { color: lineType === 'non_voip' ? '#16A34A' : colors.primary },
+                              { color: colors.primary },
                             ]}
                           >
                             Carrier SIM
@@ -1431,20 +1488,20 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                       </View>
 
                       <Text style={[s.stackedCardDesc, { color: colors.textSecondary }]}>
-                        Real US mobile carrier SIMs. Guaranteed for WhatsApp, Cash App, Telegram & Banking OTPs.
+                        Real mobile carrier SIM cards (AT&T, T-Mobile). Guaranteed for WhatsApp, Cash App, Telegram & Banking OTPs.
                       </Text>
 
                       <View style={s.stackedCardTagsRow}>
-                        <View style={s.tagBubble}>
-                          <ShieldCheck size={11} color="#16A34A" />
+                        <View style={[s.tagBubble, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                          <ShieldCheck size={11} color={colors.primary} />
                           <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>Physical Lines</Text>
                         </View>
-                        <View style={s.tagBubble}>
-                          <Zap size={11} color="#16A34A" />
+                        <View style={[s.tagBubble, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                          <Zap size={11} color={colors.primary} />
                           <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>Instant OTP</Text>
                         </View>
-                        <View style={s.tagBubble}>
-                          <Clock size={11} color="#16A34A" />
+                        <View style={[s.tagBubble, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                          <Clock size={11} color={colors.primary} />
                           <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>30-Day Lease</Text>
                         </View>
                       </View>
@@ -1454,8 +1511,10 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                       <View
                         style={[
                           s.radioCircle,
-                          { borderColor: lineType === 'non_voip' ? '#16A34A' : colors.border },
-                          lineType === 'non_voip' && { backgroundColor: '#16A34A' },
+                          {
+                            borderColor: lineType === 'non_voip' ? colors.primary : colors.border,
+                            backgroundColor: lineType === 'non_voip' ? colors.primary : 'transparent',
+                          },
                         ]}
                       >
                         {lineType === 'non_voip' && (
@@ -1466,7 +1525,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                   </View>
                 </TouchableOpacity>
 
-                {/* 2. VOIP LEASED LINES (BELOW) */}
+                {/* 2. VOIP VIRTUAL NUMBERS (BELOW) */}
                 <TouchableOpacity
                   activeOpacity={0.88}
                   onPress={() => {
@@ -1477,12 +1536,9 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                   style={[
                     s.stackedLineCard,
                     {
-                      backgroundColor:
-                        lineType === 'voip'
-                          ? (colors.isDark ? '#0D1E36' : '#EFF6FF')
-                          : colors.surface,
-                      borderColor:
-                        lineType === 'voip' ? '#2563EB' : colors.border,
+                      backgroundColor: colors.surface,
+                      borderColor: lineType === 'voip' ? colors.primary : colors.border,
+                      borderWidth: lineType === 'voip' ? 1.5 : 1,
                     },
                     lineType === 'voip' && s.stackedLineCardActive,
                   ]}
@@ -1494,37 +1550,34 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                         {
                           backgroundColor:
                             lineType === 'voip'
-                              ? '#2563EB'
+                              ? colors.primarySoft
                               : (colors.isDark ? '#27272A' : '#F4F4F5'),
                         },
                       ]}
                     >
                       <Phone
                         size={22}
-                        color={lineType === 'voip' ? '#FFFFFF' : colors.textMuted}
+                        color={lineType === 'voip' ? colors.primary : colors.textMuted}
                       />
                     </View>
 
                     <View style={{ flex: 1, gap: 4 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <Text style={[s.stackedCardTitle, { color: colors.text }]}>
-                          VoIP Leased Lines (Telnyx)
+                          VoIP Virtual Numbers
                         </Text>
                         <View
                           style={[
                             s.pillBadge,
                             {
-                              backgroundColor:
-                                lineType === 'voip'
-                                  ? 'rgba(37, 99, 235, 0.18)'
-                                  : colors.primarySoft,
+                              backgroundColor: colors.primarySoft,
                             },
                           ]}
                         >
                           <Text
                             style={[
                               s.pillBadgeText,
-                              { color: lineType === 'voip' ? '#2563EB' : colors.primary },
+                              { color: colors.primary },
                             ]}
                           >
                             Calls + SMS
@@ -1537,16 +1590,16 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                       </Text>
 
                       <View style={s.stackedCardTagsRow}>
-                        <View style={s.tagBubble}>
-                          <Phone size={11} color="#2563EB" />
+                        <View style={[s.tagBubble, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                          <Phone size={11} color={colors.primary} />
                           <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>Voice Calling</Text>
                         </View>
-                        <View style={s.tagBubble}>
-                          <MessageSquare size={11} color="#2563EB" />
+                        <View style={[s.tagBubble, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                          <MessageSquare size={11} color={colors.primary} />
                           <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>2-Way SMS</Text>
                         </View>
-                        <View style={s.tagBubble}>
-                          <Globe size={11} color="#2563EB" />
+                        <View style={[s.tagBubble, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                          <Globe size={11} color={colors.primary} />
                           <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>Dialpad Ready</Text>
                         </View>
                       </View>
@@ -1556,8 +1609,10 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                       <View
                         style={[
                           s.radioCircle,
-                          { borderColor: lineType === 'voip' ? '#2563EB' : colors.border },
-                          lineType === 'voip' && { backgroundColor: '#2563EB' },
+                          {
+                            borderColor: lineType === 'voip' ? colors.primary : colors.border,
+                            backgroundColor: lineType === 'voip' ? colors.primary : 'transparent',
+                          },
                         ]}
                       >
                         {lineType === 'voip' && (
@@ -1616,17 +1671,15 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                           style={[
                             s.categoryChip,
                             {
-                              backgroundColor: isActive
-                                ? (colors.isDark ? '#0F2318' : '#F0FDF4')
-                                : colors.surface,
-                              borderColor: isActive ? '#16A34A' : colors.border,
+                              backgroundColor: isActive ? colors.primary : colors.surface,
+                              borderColor: isActive ? colors.primary : colors.border,
                             },
                           ]}
                         >
                           <Text
                             style={[
                               s.categoryChipText,
-                              { color: isActive ? '#16A34A' : colors.textSecondary },
+                              { color: isActive ? '#FFFFFF' : colors.textSecondary },
                             ]}
                           >
                             {cat.label}
@@ -1656,10 +1709,8 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                           style={[
                             s.countryChip,
                             {
-                              backgroundColor: active
-                                ? (colors.isDark ? '#0D1E36' : '#EFF6FF')
-                                : colors.surface,
-                              borderColor: active ? '#2563EB' : colors.border,
+                              backgroundColor: active ? colors.primary : colors.surface,
+                              borderColor: active ? colors.primary : colors.border,
                             },
                           ]}
                         >
@@ -1667,7 +1718,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                           <Text
                             style={[
                               s.countryChipText,
-                              { color: active ? '#2563EB' : colors.textSecondary },
+                              { color: active ? '#FFFFFF' : colors.textSecondary },
                             ]}
                           >
                             {c.name}
@@ -1683,8 +1734,10 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
               <View style={s.catalogHeaderRow}>
                 <Text style={[s.catalogCountText, { color: colors.textSecondary }]}>
                   {lineType === 'non_voip'
-                    ? `${filteredCatalog.length.toLocaleString()} Physical Services Available`
-                    : `${filteredCatalog.length} Leased Numbers Ready in ${selectedCountry.name}`}
+                    ? (serviceSearch
+                        ? `${filteredCatalog.length} Matching Services`
+                        : `Top Popular Physical Services (${filteredCatalog.length})`)
+                    : `${filteredCatalog.length} Virtual Numbers in ${selectedCountry.name}`}
                 </Text>
 
                 <TouchableOpacity
@@ -1705,13 +1758,13 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
               </View>
 
               {/* ── CATALOG ITEMS ── */}
-              {loadingCatalog && availableNumbers.length === 0 ? (
+              {loadingCatalog && currentCatalog.length === 0 ? (
                 <View style={{ gap: 12 }}>
                   <SkeletonListItem />
                   <SkeletonListItem />
                   <SkeletonListItem />
                 </View>
-              ) : catalogError && availableNumbers.length === 0 ? (
+              ) : catalogError && currentCatalog.length === 0 ? (
                 <View style={[s.errorCardWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <AlertCircle size={28} color="#EF4444" />
                   <Text style={[s.errorCardTitle, { color: colors.text }]}>Could not load live inventory</Text>
@@ -1748,10 +1801,9 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
               ) : (
                 <View style={{ gap: 12 }}>
                   {lineType === 'non_voip'
-                    ? filteredCatalog.slice(0, serviceSearch ? 150 : 80).map((item, idx) => {
+                    ? filteredCatalog.map((item, idx) => {
                         const fee = item.monthlyFee || (displayCurrency === 'NGN' ? 15000 : 10.0);
                         const busy = purchasingKey === String(item.serviceId);
-                        const brand = getServiceBrand(item.serviceName || item.service || '', item.isFullAccess);
 
                         return (
                           <View
@@ -1759,25 +1811,26 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                             style={[
                               s.premiumCard,
                               {
-                                backgroundColor: item.isFullAccess
-                                  ? (colors.isDark ? '#231F10' : '#FEFCE8')
-                                  : colors.surface,
-                                borderColor: item.isFullAccess
-                                  ? '#EAB308'
-                                  : colors.border,
+                                backgroundColor: colors.surface,
+                                borderColor: item.isFullAccess ? colors.primary : colors.border,
+                                borderWidth: item.isFullAccess ? 1.5 : 1,
                               },
-                              item.isFullAccess && s.fullAccessCardGlow,
                             ]}
                           >
                             <View style={s.cardTopRow}>
                               <View style={s.cardBrandBox}>
-                                <View style={[s.brandIconBadge, { backgroundColor: brand.bg }]}>
+                                <View
+                                  style={[
+                                    s.brandIconBadge,
+                                    {
+                                      backgroundColor: colors.primarySoft,
+                                    },
+                                  ]}
+                                >
                                   {item.isFullAccess ? (
-                                    <Sparkles size={18} color="#EAB308" />
+                                    <Sparkles size={18} color={colors.primary} />
                                   ) : (
-                                    <Text style={[s.brandInitials, { color: brand.color }]}>
-                                      {brand.label}
-                                    </Text>
+                                    <Smartphone size={18} color={colors.primary} />
                                   )}
                                 </View>
 
@@ -1787,13 +1840,29 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                                       {item.serviceName || item.service}
                                     </Text>
                                     {item.isFullAccess ? (
-                                      <View style={s.goldBadge}>
-                                        <Text style={s.goldBadgeText}>★ Universal Access</Text>
+                                      <View
+                                        style={[
+                                          s.goldBadge,
+                                          {
+                                            backgroundColor: colors.primarySoft,
+                                            borderColor: colors.primary,
+                                          },
+                                        ]}
+                                      >
+                                        <Text style={[s.goldBadgeText, { color: colors.primary }]}>
+                                          ★ Universal Access
+                                        </Text>
                                       </View>
                                     ) : (
-                                      <View style={[s.stockBadge, { backgroundColor: 'rgba(22, 163, 74, 0.12)' }]}>
-                                        <View style={s.liveGreenDot} />
-                                        <Text style={[s.stockBadgeText, { color: '#16A34A' }]}>
+                                      <View
+                                        style={[
+                                          s.stockBadge,
+                                          {
+                                            backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5',
+                                          },
+                                        ]}
+                                      >
+                                        <Text style={[s.stockBadgeText, { color: colors.textSecondary }]}>
                                           {item.available !== undefined ? `${item.available} in stock` : 'Active'}
                                         </Text>
                                       </View>
@@ -1811,17 +1880,17 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
 
                             {/* Tags Row */}
                             <View style={s.chipsRow}>
-                              <View style={[s.featurePill, { backgroundColor: 'rgba(22, 163, 74, 0.12)' }]}>
-                                <ShieldCheck size={11} color="#16A34A" />
-                                <Text style={[s.featurePillText, { color: '#16A34A' }]}>Physical SIM</Text>
+                              <View style={[s.featurePill, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                                <ShieldCheck size={11} color={colors.primary} />
+                                <Text style={[s.featurePillText, { color: colors.textSecondary }]}>Physical SIM</Text>
                               </View>
-                              <View style={s.featurePillMuted}>
-                                <MessageSquare size={11} color={colors.textMuted} />
-                                <Text style={[s.featurePillTextMuted, { color: colors.textMuted }]}>SMS Verification</Text>
+                              <View style={[s.featurePill, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                                <MessageSquare size={11} color={colors.primary} />
+                                <Text style={[s.featurePillText, { color: colors.textSecondary }]}>SMS Verification</Text>
                               </View>
-                              <View style={s.featurePillMuted}>
-                                <Clock size={11} color={colors.textMuted} />
-                                <Text style={[s.featurePillTextMuted, { color: colors.textMuted }]}>30-Day Rolling</Text>
+                              <View style={[s.featurePill, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                                <Clock size={11} color={colors.primary} />
+                                <Text style={[s.featurePillText, { color: colors.textSecondary }]}>30-Day Lease</Text>
                               </View>
                             </View>
 
@@ -1837,7 +1906,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                               <TouchableOpacity
                                 style={[
                                   s.rentBtn,
-                                  item.isFullAccess && { backgroundColor: '#CA8A04' },
+                                  { backgroundColor: colors.primary },
                                   busy && { opacity: 0.7 },
                                 ]}
                                 onPress={() => handleRentNumber(item)}
@@ -1873,8 +1942,8 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                           >
                             <View style={s.cardTopRow}>
                               <View style={s.cardBrandBox}>
-                                <View style={[s.brandIconBadge, { backgroundColor: 'rgba(37, 99, 235, 0.15)' }]}>
-                                  <Phone size={18} color="#2563EB" />
+                                <View style={[s.brandIconBadge, { backgroundColor: colors.primarySoft }]}>
+                                  <Phone size={18} color={colors.primary} />
                                 </View>
 
                                 <View style={{ flex: 1, gap: 2 }}>
@@ -1882,9 +1951,13 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                                     <Text style={[s.phoneTitleText, { color: colors.text }]}>
                                       {formattedPhone || item.phoneNumber}
                                     </Text>
-                                    <View style={[s.stockBadge, { backgroundColor: 'rgba(37, 99, 235, 0.12)' }]}>
-                                      <View style={[s.liveGreenDot, { backgroundColor: '#2563EB' }]} />
-                                      <Text style={[s.stockBadgeText, { color: '#2563EB' }]}>
+                                    <View
+                                      style={[
+                                        s.stockBadge,
+                                        { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' },
+                                      ]}
+                                    >
+                                      <Text style={[s.stockBadgeText, { color: colors.textSecondary }]}>
                                         {selectedCountry.flag} {item.region || selectedCountry.name}
                                       </Text>
                                     </View>
@@ -1899,17 +1972,17 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
 
                             {/* Features row */}
                             <View style={s.chipsRow}>
-                              <View style={[s.featurePill, { backgroundColor: 'rgba(37, 99, 235, 0.12)' }]}>
-                                <Phone size={11} color="#2563EB" />
-                                <Text style={[s.featurePillText, { color: '#2563EB' }]}>HD Voice Calling</Text>
+                              <View style={[s.featurePill, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                                <Phone size={11} color={colors.primary} />
+                                <Text style={[s.featurePillText, { color: colors.textSecondary }]}>HD Voice Calling</Text>
                               </View>
-                              <View style={[s.featurePill, { backgroundColor: 'rgba(37, 99, 235, 0.12)' }]}>
-                                <MessageSquare size={11} color="#2563EB" />
-                                <Text style={[s.featurePillText, { color: '#2563EB' }]}>2-Way SMS Threads</Text>
+                              <View style={[s.featurePill, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                                <MessageSquare size={11} color={colors.primary} />
+                                <Text style={[s.featurePillText, { color: colors.textSecondary }]}>2-Way SMS</Text>
                               </View>
-                              <View style={s.featurePillMuted}>
-                                <Globe size={11} color={colors.textMuted} />
-                                <Text style={[s.featurePillTextMuted, { color: colors.textMuted }]}>Dialpad Ready</Text>
+                              <View style={[s.featurePill, { backgroundColor: colors.isDark ? '#27272A' : '#F4F4F5' }]}>
+                                <Globe size={11} color={colors.primary} />
+                                <Text style={[s.featurePillText, { color: colors.textSecondary }]}>Dialpad Ready</Text>
                               </View>
                             </View>
 
@@ -1923,7 +1996,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                               </View>
 
                               <TouchableOpacity
-                                style={[s.rentBtn, { backgroundColor: '#2563EB' }, busy && { opacity: 0.7 }]}
+                                style={[s.rentBtn, { backgroundColor: colors.primary }, busy && { opacity: 0.7 }]}
                                 onPress={() => handleRentNumber(item)}
                                 disabled={busy}
                               >
@@ -1941,10 +2014,10 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                         );
                       })}
 
-                  {lineType === 'non_voip' && filteredCatalog.length > 80 && !serviceSearch && (
+                  {lineType === 'non_voip' && !serviceSearch && (
                     <View style={[s.moreServicesNote, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                       <Text style={[s.moreServicesNoteText, { color: colors.textMuted }]}>
-                        Showing top 80 of {filteredCatalog.length.toLocaleString()} physical services. Use search above to find any specific app.
+                        Showing top 25 popular services · Search above to find any of 2,000+ available apps
                       </Text>
                     </View>
                   )}
