@@ -34,6 +34,8 @@ export interface User {
   createdAt?: string;
   authProvider?: string;
   isGoogleLinked?: boolean;
+  googleProfilePicture?: string;
+  avatar?: string;
   isTelegramLinked?: boolean;
   telegramId?: string;
   telegramUsername?: string;

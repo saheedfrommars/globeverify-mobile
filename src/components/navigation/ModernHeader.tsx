@@ -11,6 +11,7 @@ import {
   Animated,
   Easing,
   Platform,
+  Image,
 } from 'react-native';
 import {
   Globe,
@@ -172,8 +173,13 @@ const ModernHeaderComponent: React.FC<ModernHeaderProps> = ({
   const [markingAll, setMarkingAll] = useState(false);
   const [isOffline, setIsOffline] = useState<boolean>(getIsOffline());
   const [retryingNet, setRetryingNet] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const slideAnim = useRef(new Animated.Value(-300)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [user?.googleProfilePicture]);
 
   useEffect(() => {
     const unsubscribe = subscribeNetworkStatus((offline) => {
@@ -283,6 +289,7 @@ const ModernHeaderComponent: React.FC<ModernHeaderProps> = ({
 
   const badgeNumber = notificationCount !== undefined ? notificationCount : unreadCount;
 
+  const avatarUri = user?.googleProfilePicture || (user as any)?.avatar;
   const userInitial = (user?.name || user?.email || 'S').trim().charAt(0).toUpperCase();
   const displayCurrency = user?.currency?.toUpperCase() === 'NGN' ? 'NGN' : 'USD';
   const userBalance =
@@ -512,7 +519,16 @@ const ModernHeaderComponent: React.FC<ModernHeaderProps> = ({
                 style={styles.userAvatarCircle}
                 activeOpacity={0.85}
               >
-                <Text style={styles.userAvatarLetter}>{userInitial}</Text>
+                {avatarUri && !avatarFailed ? (
+                  <Image
+                    source={{ uri: avatarUri }}
+                    style={styles.userAvatarImage}
+                    resizeMode="cover"
+                    onError={() => setAvatarFailed(true)}
+                  />
+                ) : (
+                  <Text style={styles.userAvatarLetter}>{userInitial}</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -656,7 +672,16 @@ const ModernHeaderComponent: React.FC<ModernHeaderProps> = ({
               activeOpacity={0.75}
             >
               <View style={styles.stripAvatar}>
-                <Text style={styles.stripAvatarText}>{userInitial}</Text>
+                {avatarUri && !avatarFailed ? (
+                  <Image
+                    source={{ uri: avatarUri }}
+                    style={styles.stripAvatarImage}
+                    resizeMode="cover"
+                    onError={() => setAvatarFailed(true)}
+                  />
+                ) : (
+                  <Text style={styles.stripAvatarText}>{userInitial}</Text>
+                )}
               </View>
               <View style={{ flex: 1 }}>
                 <Text
@@ -1049,6 +1074,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#5B46E5',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  userAvatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 17,
   },
   userAvatarLetter: {
     color: '#FFFFFF',
@@ -1130,6 +1161,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#5B46E5',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  stripAvatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 19,
   },
   stripAvatarText: {
     color: '#FFFFFF',
