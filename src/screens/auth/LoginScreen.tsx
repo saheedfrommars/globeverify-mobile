@@ -8,6 +8,7 @@ import {
   Linking,
   Alert,
   Modal,
+  Platform,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Mail, Lock, AlertCircle, ArrowRight } from 'lucide-react-native';
@@ -16,6 +17,8 @@ import { AuthLayout } from './AuthLayout';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { GoogleButton } from '../../components/ui/GoogleButton';
+import { AppleButton } from '../../components/ui/AppleButton';
+import { signInWithApple } from '../../services/appleAuth';
 import { LegalScreen } from '../legal/LegalScreen';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from '../../api/client';
@@ -93,6 +96,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       setErrorMessage(message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAppleAuth = async () => {
+    setErrorMessage('');
+    const result = await signInWithApple();
+    if (result.type === 'success') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await login(result.token, result.user);
+      if (result.isNew) await clearPendingReferral();
+      onLoginSuccess();
+    } else if (result.type === 'error') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(result.message);
     }
   };
 
@@ -232,8 +249,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         />
       </View>
 
-      {/* Google Authentication */}
-      <GoogleButton onPress={handleGoogleAuth} style={styles.googleBtn} />
+      {/* Social Authentication: Google on all devices, Apple on iOS only */}
+      <View style={{ gap: 10 }}>
+        <GoogleButton onPress={handleGoogleAuth} style={styles.googleBtn} />
+        {Platform.OS === 'ios' && (
+          <AppleButton onPress={handleAppleAuth} />
+        )}
+      </View>
 
       {/* Legal Agreement / Compliance Notice */}
       <View style={styles.termsAgreementWrap}>

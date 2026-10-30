@@ -27,6 +27,10 @@ import {
   RotateCcw,
   Zap,
   Receipt,
+  ShieldCheck,
+  Globe,
+  Bot,
+  Sparkles,
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
@@ -502,245 +506,349 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
             </View>
           </View>
 
-          {/* ── 2. ADD FUNDS / TOP UP (Standalone Gateway Cards — Matches Screenshot 2!) ── */}
-          <View style={s.sectionBlock}>
-            <Text style={[s.sectionTitle, { color: colors.text }]}>
-              Add Funds / Top Up
-            </Text>
-            <Text style={[s.pageSubtitle, { color: colors.textMuted }]}>
-              Choose your preferred payment method below to fund your account
-            </Text>
-
-            {/* Gateway Card 1: Naira (₦) Card / Bank Transfer */}
-            <TouchableOpacity
-              onPress={() => {
-                triggerHaptic('selection');
-                setPaymentMode('fiat');
-              }}
-              style={[
-                s.gatewayCard,
-                {
-                  backgroundColor: colors.surface,
-                  borderColor:
-                    paymentMode === 'fiat' ? '#3B82F6' : colors.border,
-                  borderWidth: paymentMode === 'fiat' ? 1.5 : 1,
-                },
-              ]}
-              activeOpacity={0.85}
-            >
-              <View style={s.gatewayTopRow}>
-                <View
-                  style={[
-                    s.gatewayIconBox,
-                    {
-                      backgroundColor: colors.isDark
-                        ? 'rgba(59, 130, 246, 0.14)'
-                        : '#E0EAFF',
-                    },
-                  ]}
-                >
-                  <CreditCard size={18} color="#2563EB" strokeWidth={2.1} />
-                </View>
-
-                {paymentMode === 'fiat' ? (
-                  <View style={s.activeGreenPill}>
-                    <Text style={s.activeGreenPillText}>ACTIVE</Text>
-                  </View>
-                ) : (
-                  <Text style={[s.selectLabelText, { color: colors.textMuted }]}>
-                    SELECT
-                  </Text>
-                )}
-              </View>
-
-              <Text style={[s.gatewayTitle, { color: colors.text }]}>
-                {isUserNgn
-                  ? 'Naira (₦) Card / Bank Transfer'
-                  : 'Debit/Credit Card & Bank'}
-              </Text>
-              <Text style={[s.gatewayDesc, { color: colors.textMuted }]}>
-                {isUserNgn
-                  ? 'Pay instantly with Nigerian ATM cards, USSD, or direct bank transfer.'
-                  : 'Instant local and international card payments via secure gateway.'}
-              </Text>
-
-              <View style={[s.gatewayFooter, { borderTopColor: colors.border }]}>
-                <Text style={[s.gatewayFooterLeft, { color: colors.text }]}>
-                  {isUserNgn ? 'NG NGN (Naira)' : `${displayCurrency} Card`}
-                </Text>
-                <Text style={s.instantCheckoutText}>Instant Checkout ⚡</Text>
-              </View>
-            </TouchableOpacity>
-
-            {/* Gateway Card 2: Cryptocurrency Gateway */}
-            <TouchableOpacity
-              onPress={() => {
-                triggerHaptic('selection');
-                setPaymentMode('crypto');
-              }}
-              style={[
-                s.gatewayCard,
-                {
-                  backgroundColor: colors.surface,
-                  borderColor:
-                    paymentMode === 'crypto' ? '#8B5CF6' : colors.border,
-                  borderWidth: paymentMode === 'crypto' ? 1.5 : 1,
-                },
-              ]}
-              activeOpacity={0.85}
-            >
-              <View style={s.gatewayTopRow}>
-                <View
-                  style={[
-                    s.gatewayIconBox,
-                    {
-                      backgroundColor: colors.isDark
-                        ? 'rgba(139, 92, 246, 0.14)'
-                        : '#F3E8FF',
-                    },
-                  ]}
-                >
-                  <Coins size={18} color="#8B5CF6" strokeWidth={2.1} />
-                </View>
-
-                {paymentMode === 'crypto' ? (
-                  <View style={s.activeGreenPill}>
-                    <Text style={s.activeGreenPillText}>ACTIVE</Text>
-                  </View>
-                ) : (
-                  <Text style={[s.selectLabelText, { color: colors.textMuted }]}>
-                    SELECT
-                  </Text>
-                )}
-              </View>
-
-              <Text style={[s.gatewayTitle, { color: colors.text }]}>
-                Cryptocurrency Gateway
-              </Text>
-              <Text style={[s.gatewayDesc, { color: colors.textMuted }]}>
-                Pay with USDT, Bitcoin, TRON, Ethereum, Litecoin, SOL & more via secure hosted checkout.
-              </Text>
-
-              <View style={[s.gatewayFooter, { borderTopColor: colors.border }]}>
-                <Text style={[s.gatewayFooterLeft, { color: colors.text }]}>
-                  🌐 Multi-Chain Crypto
-                </Text>
-                <Text style={s.instantCheckoutText}>Instant Checkout ⚡</Text>
-              </View>
-            </TouchableOpacity>
-
-            {/* Quick Select Presets */}
-            <View style={{ gap: 8, marginTop: 4 }}>
-              <Text style={[s.presetsLabel, { color: colors.textMuted }]}>
-                Quick select amount ({displayCurrency}):
-              </Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: 8 }}
-              >
-                {quickPresets.map((preset) => {
-                  const isSelected = parseFloat(depositAmount) === preset;
-                  return (
-                    <TouchableOpacity
-                      key={preset}
-                      onPress={() => {
-                        triggerHaptic('selection');
-                        setDepositAmount(String(preset));
-                      }}
-                      style={[
-                        s.presetChip,
-                        {
-                          backgroundColor: isSelected
-                            ? colors.primarySoft
-                            : colors.surface,
-                          borderColor: isSelected ? colors.primary : colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          s.presetChipText,
-                          { color: isSelected ? colors.primary : colors.text },
-                        ]}
-                      >
-                        {userSymbol}
-                        {preset.toLocaleString()}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
-
-            {/* Amount Input & Pay Button */}
-            <View style={{ gap: 10 }}>
+          {/* ── 2. ADD FUNDS / TOP UP (Guarded for Apple App Store Guidelines) ── */}
+          {Platform.OS === 'ios' ? (
+            <View style={s.sectionBlock}>
               <View
                 style={[
-                  s.amountInputRow,
+                  s.iosNoticeCard,
                   {
                     backgroundColor: colors.surface,
                     borderColor: colors.border,
                   },
                 ]}
               >
-                <Text style={[s.inputPrefix, { color: colors.textMuted }]}>
-                  {userSymbol}
-                </Text>
-                <TextInput
-                  style={[s.amountInput, { color: colors.text }]}
-                  value={depositAmount}
-                  onChangeText={setDepositAmount}
-                  keyboardType="numeric"
-                  placeholder={`Enter amount in ${displayCurrency}`}
-                  placeholderTextColor={colors.textMuted}
-                />
-                <Text style={[s.inputSuffix, { color: colors.textMuted }]}>
-                  {displayCurrency}
-                </Text>
-              </View>
+                <View style={s.iosNoticeHeader}>
+                  <View
+                    style={[
+                      s.iosNoticeIconBox,
+                      {
+                        backgroundColor: colors.isDark
+                          ? 'rgba(59, 130, 246, 0.16)'
+                          : '#EFF6FF',
+                      },
+                    ]}
+                  >
+                    <ShieldCheck size={22} color="#2563EB" strokeWidth={2.2} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.iosNoticeTitle, { color: colors.text }]}>
+                      Wallet Top-Up & Sync
+                    </Text>
+                    <Text
+                      style={[s.iosNoticeSubtitle, { color: colors.textMuted }]}
+                    >
+                      Multiplatform account balance
+                    </Text>
+                  </View>
+                </View>
 
+                <Text style={[s.iosNoticeBody, { color: colors.textMuted }]}>
+                  To fund your account wallet, please complete your deposit via
+                  the GlobeVerify web platform or official Telegram bot. Any
+                  balance added synchronizes instantly with your account on
+                  iPhone.
+                </Text>
+
+                <View
+                  style={[
+                    s.iosNoticeFeatures,
+                    { borderTopColor: colors.border },
+                  ]}
+                >
+                  <View style={s.iosNoticeFeatureItem}>
+                    <Globe size={15} color="#2563EB" />
+                    <Text
+                      style={[s.iosNoticeFeatureText, { color: colors.text }]}
+                    >
+                      Web Dashboard
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      s.iosNoticeFeatureDivider,
+                      { backgroundColor: colors.border },
+                    ]}
+                  />
+                  <View style={s.iosNoticeFeatureItem}>
+                    <Bot size={15} color="#2563EB" />
+                    <Text
+                      style={[s.iosNoticeFeatureText, { color: colors.text }]}
+                    >
+                      Telegram Bot
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      s.iosNoticeFeatureDivider,
+                      { backgroundColor: colors.border },
+                    ]}
+                  />
+                  <View style={s.iosNoticeFeatureItem}>
+                    <Sparkles size={15} color="#10B981" />
+                    <Text
+                      style={[s.iosNoticeFeatureText, { color: colors.text }]}
+                    >
+                      Realtime Sync
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          ) : (
+            <View style={s.sectionBlock}>
+              <Text style={[s.sectionTitle, { color: colors.text }]}>
+                Add Funds / Top Up
+              </Text>
+              <Text style={[s.pageSubtitle, { color: colors.textMuted }]}>
+                Choose your preferred payment method below to fund your account
+              </Text>
+
+              {/* Gateway Card 1: Naira (₦) Card / Bank Transfer */}
               <TouchableOpacity
+                onPress={() => {
+                  triggerHaptic('selection');
+                  setPaymentMode('fiat');
+                }}
                 style={[
-                  s.paySubmitBtn,
+                  s.gatewayCard,
                   {
-                    backgroundColor:
-                      paymentMode === 'crypto' ? '#7C3AED' : '#2563EB',
+                    backgroundColor: colors.surface,
+                    borderColor:
+                      paymentMode === 'fiat' ? '#3B82F6' : colors.border,
+                    borderWidth: paymentMode === 'fiat' ? 1.5 : 1,
                   },
-                  (!depositAmount ||
-                    parseFloat(depositAmount) <= 0 ||
-                    processingDeposit) && { opacity: 0.6 },
                 ]}
-                onPress={handleDeposit}
-                disabled={
-                  !depositAmount ||
-                  parseFloat(depositAmount) <= 0 ||
-                  processingDeposit
-                }
                 activeOpacity={0.85}
               >
-                {processingDeposit ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    {paymentMode === 'crypto' ? (
-                      <Coins size={16} color="#FFFFFF" />
-                    ) : (
-                      <Zap size={16} color="#FFFFFF" />
-                    )}
-                    <Text style={s.paySubmitBtnText}>
-                      Pay{' '}
-                      {depositAmount && parseFloat(depositAmount) > 0
-                        ? `${userSymbol}${parseFloat(depositAmount).toLocaleString()}`
-                        : ''}{' '}
-                      with {paymentMode === 'crypto' ? 'Crypto' : 'Card / Bank'}
+                <View style={s.gatewayTopRow}>
+                  <View
+                    style={[
+                      s.gatewayIconBox,
+                      {
+                        backgroundColor: colors.isDark
+                          ? 'rgba(59, 130, 246, 0.14)'
+                          : '#E0EAFF',
+                      },
+                    ]}
+                  >
+                    <CreditCard size={18} color="#2563EB" strokeWidth={2.1} />
+                  </View>
+
+                  {paymentMode === 'fiat' ? (
+                    <View style={s.activeGreenPill}>
+                      <Text style={s.activeGreenPillText}>ACTIVE</Text>
+                    </View>
+                  ) : (
+                    <Text
+                      style={[s.selectLabelText, { color: colors.textMuted }]}
+                    >
+                      SELECT
                     </Text>
-                    <ArrowUpRight size={16} color="#FFFFFF" />
-                  </>
-                )}
+                  )}
+                </View>
+
+                <Text style={[s.gatewayTitle, { color: colors.text }]}>
+                  {isUserNgn
+                    ? 'Naira (₦) Card / Bank Transfer'
+                    : 'Debit/Credit Card & Bank'}
+                </Text>
+                <Text style={[s.gatewayDesc, { color: colors.textMuted }]}>
+                  {isUserNgn
+                    ? 'Pay instantly with Nigerian ATM cards, USSD, or direct bank transfer.'
+                    : 'Instant local and international card payments via secure gateway.'}
+                </Text>
+
+                <View
+                  style={[s.gatewayFooter, { borderTopColor: colors.border }]}
+                >
+                  <Text style={[s.gatewayFooterLeft, { color: colors.text }]}>
+                    {isUserNgn ? 'NG NGN (Naira)' : `${displayCurrency} Card`}
+                  </Text>
+                  <Text style={s.instantCheckoutText}>Instant Checkout ⚡</Text>
+                </View>
               </TouchableOpacity>
+
+              {/* Gateway Card 2: Cryptocurrency Gateway */}
+              <TouchableOpacity
+                onPress={() => {
+                  triggerHaptic('selection');
+                  setPaymentMode('crypto');
+                }}
+                style={[
+                  s.gatewayCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor:
+                      paymentMode === 'crypto' ? '#8B5CF6' : colors.border,
+                    borderWidth: paymentMode === 'crypto' ? 1.5 : 1,
+                  },
+                ]}
+                activeOpacity={0.85}
+              >
+                <View style={s.gatewayTopRow}>
+                  <View
+                    style={[
+                      s.gatewayIconBox,
+                      {
+                        backgroundColor: colors.isDark
+                          ? 'rgba(139, 92, 246, 0.14)'
+                          : '#F3E8FF',
+                      },
+                    ]}
+                  >
+                    <Coins size={18} color="#8B5CF6" strokeWidth={2.1} />
+                  </View>
+
+                  {paymentMode === 'crypto' ? (
+                    <View style={s.activeGreenPill}>
+                      <Text style={s.activeGreenPillText}>ACTIVE</Text>
+                    </View>
+                  ) : (
+                    <Text
+                      style={[s.selectLabelText, { color: colors.textMuted }]}
+                    >
+                      SELECT
+                    </Text>
+                  )}
+                </View>
+
+                <Text style={[s.gatewayTitle, { color: colors.text }]}>
+                  Cryptocurrency Gateway
+                </Text>
+                <Text style={[s.gatewayDesc, { color: colors.textMuted }]}>
+                  Pay with USDT, Bitcoin, TRON, Ethereum, Litecoin, SOL & more
+                  via secure hosted checkout.
+                </Text>
+
+                <View
+                  style={[s.gatewayFooter, { borderTopColor: colors.border }]}
+                >
+                  <Text style={[s.gatewayFooterLeft, { color: colors.text }]}>
+                    🌐 Multi-Chain Crypto
+                  </Text>
+                  <Text style={s.instantCheckoutText}>Instant Checkout ⚡</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Quick Select Presets */}
+              <View style={{ gap: 8, marginTop: 4 }}>
+                <Text style={[s.presetsLabel, { color: colors.textMuted }]}>
+                  Quick select amount ({displayCurrency}):
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 8 }}
+                >
+                  {quickPresets.map((preset) => {
+                    const isSelected = parseFloat(depositAmount) === preset;
+                    return (
+                      <TouchableOpacity
+                        key={preset}
+                        onPress={() => {
+                          triggerHaptic('selection');
+                          setDepositAmount(String(preset));
+                        }}
+                        style={[
+                          s.presetChip,
+                          {
+                            backgroundColor: isSelected
+                              ? colors.primarySoft
+                              : colors.surface,
+                            borderColor: isSelected
+                              ? colors.primary
+                              : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            s.presetChipText,
+                            {
+                              color: isSelected ? colors.primary : colors.text,
+                            },
+                          ]}
+                        >
+                          {userSymbol}
+                          {preset.toLocaleString()}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              {/* Amount Input & Pay Button */}
+              <View style={{ gap: 10 }}>
+                <View
+                  style={[
+                    s.amountInputRow,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[s.inputPrefix, { color: colors.textMuted }]}>
+                    {userSymbol}
+                  </Text>
+                  <TextInput
+                    style={[s.amountInput, { color: colors.text }]}
+                    value={depositAmount}
+                    onChangeText={setDepositAmount}
+                    keyboardType="numeric"
+                    placeholder={`Enter amount in ${displayCurrency}`}
+                    placeholderTextColor={colors.textMuted}
+                  />
+                  <Text style={[s.inputSuffix, { color: colors.textMuted }]}>
+                    {displayCurrency}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    s.paySubmitBtn,
+                    {
+                      backgroundColor:
+                        paymentMode === 'crypto' ? '#7C3AED' : '#2563EB',
+                    },
+                    (!depositAmount ||
+                      parseFloat(depositAmount) <= 0 ||
+                      processingDeposit) && { opacity: 0.6 },
+                  ]}
+                  onPress={handleDeposit}
+                  disabled={
+                    !depositAmount ||
+                    parseFloat(depositAmount) <= 0 ||
+                    processingDeposit
+                  }
+                  activeOpacity={0.85}
+                >
+                  {processingDeposit ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      {paymentMode === 'crypto' ? (
+                        <Coins size={16} color="#FFFFFF" />
+                      ) : (
+                        <Zap size={16} color="#FFFFFF" />
+                      )}
+                      <Text style={s.paySubmitBtnText}>
+                        Pay{' '}
+                        {depositAmount && parseFloat(depositAmount) > 0
+                          ? `${userSymbol}${parseFloat(depositAmount).toLocaleString()}`
+                          : ''}{' '}
+                        with{' '}
+                        {paymentMode === 'crypto' ? 'Crypto' : 'Card / Bank'}
+                      </Text>
+                      <ArrowUpRight size={16} color="#FFFFFF" />
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          )}
 
           {/* ── 3. TRANSACTION HISTORY (Clean Flat Divided List!) ─────────── */}
           <View style={s.sectionBlock}>
@@ -1103,6 +1211,59 @@ const s = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14.5,
     fontWeight: '800',
+  },
+
+  // iOS Apple Review Compliant Top-Up Card
+  iosNoticeCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 18,
+    gap: 14,
+  },
+  iosNoticeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  iosNoticeIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iosNoticeTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  iosNoticeSubtitle: {
+    fontSize: 12.5,
+    marginTop: 2,
+  },
+  iosNoticeBody: {
+    fontSize: 13.5,
+    lineHeight: 20,
+  },
+  iosNoticeFeatures: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 14,
+  },
+  iosNoticeFeatureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  iosNoticeFeatureDivider: {
+    width: 1,
+    height: 14,
+  },
+  iosNoticeFeatureText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
 
   // 3. Transaction History (Flat Divided List)

@@ -8,6 +8,7 @@ import {
   Linking,
   Alert,
   Modal,
+  Platform,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import {
@@ -24,6 +25,8 @@ import { AuthLayout } from './AuthLayout';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { GoogleButton } from '../../components/ui/GoogleButton';
+import { AppleButton } from '../../components/ui/AppleButton';
+import { signInWithApple } from '../../services/appleAuth';
 import {
   CountryPickerModal,
   CountryItem,
@@ -126,6 +129,19 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
     }
   };
 
+  const handleAppleAuth = async () => {
+    setErrorMessage('');
+    const result = await signInWithApple();
+    if (result.type === 'success') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await login(result.token, result.user);
+      await clearPendingReferral();
+    } else if (result.type === 'error') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(result.message);
+    }
+  };
+
   const handleGoogleAuth = async () => {
     setErrorMessage('');
     const result = await signInWithGoogle();
@@ -155,12 +171,20 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({
         </Text>
       }
     >
-      {/* Google Authentication (Top on web) */}
-      <GoogleButton
-        onPress={handleGoogleAuth}
-        title="Sign up with Google"
-        style={styles.googleBtn}
-      />
+      {/* Social Authentication: Google on all devices, Apple on iOS only */}
+      <View style={{ gap: 10 }}>
+        <GoogleButton
+          onPress={handleGoogleAuth}
+          title="Sign up with Google"
+          style={styles.googleBtn}
+        />
+        {Platform.OS === 'ios' && (
+          <AppleButton
+            onPress={handleAppleAuth}
+            title="Sign up with Apple"
+          />
+        )}
+      </View>
 
       {/* Divider */}
       <View style={styles.dividerRow}>
