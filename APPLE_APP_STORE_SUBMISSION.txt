@@ -1,0 +1,181 @@
+================================================================================
+APPLE APP STORE CONNECT - COPY & PASTE SUBMISSION GUIDE
+Application: GlobeVerify (com.globeverify.app)
+================================================================================
+
+This document contains EXACT plain text answers and descriptions ready to copy 
+and paste directly into Apple App Store Connect (appstoreconnect.apple.com).
+
+--------------------------------------------------------------------------------
+1. APP INFORMATION & METADATA
+--------------------------------------------------------------------------------
+
+[App Name] (Max 30 characters):
+GlobeVerify: SMS Verification
+
+[Subtitle] (Max 30 characters):
+Virtual Numbers & Real VoIP
+
+[Primary Category]:
+Utilities (or Business)
+
+[Secondary Category]:
+Telecommunications (or Productivity)
+
+[Bundle ID]:
+com.globeverify.app
+
+[SKU]:
+GLOBEVERIFY_IOS_001
+
+[User Access]:
+Full Access
+
+--------------------------------------------------------------------------------
+2. VERSION INFORMATION (STORE LISTING)
+--------------------------------------------------------------------------------
+
+[Promotional Text] (Max 170 characters):
+Get instant SMS verification numbers & clean non-VoIP lines from 150+ countries. Fast, private, and dependable.
+
+[Keywords] (Max 100 characters, comma-separated, no spaces after commas):
+sms verification,virtual number,phone number,voip,telecom,otp receiver,second line,temporary number,esim
+
+[Support URL]:
+https://globeverify.com/support
+
+[Marketing URL]:
+https://globeverify.com
+
+[Privacy Policy URL]:
+https://globeverify.com/privacy
+
+[Description] (Max 4,000 characters):
+GlobeVerify provides fast, reliable, and secure virtual phone numbers from 150+ countries for SMS verification, business communications, and personal privacy.
+
+Whether you need a dedicated temporary number for signing up to online platforms or long-term private rentals, GlobeVerify delivers instant verification codes with 99.9% uptime.
+
+KEY FEATURES:
+• Global Coverage: Access real carrier non-VoIP and VoIP numbers across the USA, UK, Canada, Nigeria, Germany, France, and 150+ countries.
+• Instant Code Delivery: Real-time SMS and OTP reception with automated status tracking.
+• Multiple Pools & Providers: Choose between ultra-low-cost pools and premium telecom carriers for guaranteed compatibility.
+• Rental Numbers: Reserve private phone lines for 1 day, 7 days, 30 days, or longer to receive repeated verification codes and telecom voice calls.
+• Multiplatform Account: Unified balance that updates seamlessly across all your devices.
+• Privacy First: Auto-expiring SMS logs, zero data sharing, and end-to-end security for your peace of mind.
+• AI & Live Support: Integrated 24/7 intelligent assistance with our support team.
+
+Protect your personal phone number from spam, data leaks, and marketing lists. Get your private virtual number today with GlobeVerify.
+
+--------------------------------------------------------------------------------
+3. AGE RATING & CONTENT DECLARATION
+--------------------------------------------------------------------------------
+
+Answer NO to all of the following:
+• Violence: None
+• Sexual Content & Nudity: None
+• Profanity or Crude Humor: None
+• Alcohol, Tobacco, or Drug Use: None
+• Gambling: None
+• Contests / Real Money Gambling: None
+• Horror / Fear Themes: None
+• Medical / Treatment Info: None
+• Unrestricted Web Access: No
+
+Resulting Age Rating: 4+ (or 12+ if mild online interactions are flagged)
+
+--------------------------------------------------------------------------------
+4. APP REVIEW INFORMATION (CRITICAL - DO NOT SKIP)
+--------------------------------------------------------------------------------
+
+[Sign-in required]: 
+YES (Check the box)
+
+[User Name / Email]:
+reviewer@globeverify.com  <-- (Replace with your actual test account email)
+
+[Password]:
+GlobeVerify2026!  <-- (Replace with your actual test account password)
+
+[Two-Factor Authentication]:
+DISABLED on reviewer account (Ensure 2FA is turned OFF so Apple reviewer logs in immediately)
+
+[Pre-Funded Wallet Balance]:
+$10.00 - $20.00 (Ensure this test account has a credit balance so the reviewer can test purchasing a number without needing to deposit!)
+
+[Notes for App Reviewer] (Copy and paste into the Notes text box):
+--------------------------------------------------------------------------------
+Dear Apple App Review Team,
+
+Thank you for reviewing GlobeVerify.
+
+1. TEST CREDENTIALS:
+- Email: reviewer@globeverify.com
+- Password: GlobeVerify2026!
+- 2FA is disabled on this account for streamlined evaluation.
+- This account has been pre-credited with a testing balance of $15.00 USD. You can test buying a virtual number, receiving SMS verification, and creating a rental line immediately without depositing any funds.
+
+2. MULTIPLATFORM ACCOUNT & GUIDELINE 3.1.3(b):
+GlobeVerify is a multiplatform telecom utility that operates on Web and Mobile. Account balances and wallet credits are unified. To ensure strict compliance with Apple Guideline 3.1.1 and 3.1.3(b), all external direct payment gateways (Cards, Crypto) and external checkout links have been disabled on iOS. The app functions as a reader and multiplatform management client for registered users.
+
+3. HARDWARE PERMISSIONS (MICROPHONE):
+Microphone permission (NSMicrophoneUsageDescription) is used strictly for the two-way VoIP telecom calling feature when making or answering calls on leased rental numbers. It is not used for background recording.
+
+4. SIGN IN WITH APPLE & ACCOUNT DELETION:
+Sign in with Apple (Guideline 4.8) is fully implemented on iOS alongside Google Sign-In. Complete in-app account deletion (Guideline 5.1.1(v)) is available directly under Settings -> Delete Account.
+
+If you have any questions or require additional test configurations, please contact our team directly at support@globeverify.com.
+--------------------------------------------------------------------------------
+
+[Contact Information]:
+First Name: Saheed
+Last Name: Suleiman
+Phone Number: +234XXXXXXXXXX (Enter your international phone number e.g. +2348012345678)
+Email Address: support@globeverify.com
+
+--------------------------------------------------------------------------------
+5. APP PRIVACY (NUTRITION LABEL) QUESTIONNAIRE ANSWERS
+--------------------------------------------------------------------------------
+
+Question: "Do you or your third-party partners collect data from this app?"
+Answer: YES
+
+Select the following Data Types:
+
+1. CONTACT INFO -> Email Address & Name
+   • Used for: App Functionality, Account Management
+   • Linked to the user's identity? YES
+   • Used for tracking purposes? NO
+
+2. IDENTIFIERS -> User ID
+   • Used for: App Functionality
+   • Linked to the user's identity? YES
+   • Used for tracking purposes? NO
+
+3. PURCHASES -> Purchase History
+   • Used for: App Functionality (viewing active numbers and leased services)
+   • Linked to the user's identity? YES
+   • Used for tracking purposes? NO
+
+4. AUDIO DATA -> Voice or Sound Recordings (Microphone)
+   • Used for: App Functionality (VoIP calling on leased numbers)
+   • Linked to the user's identity? NO
+   • Collected transiently (processed in memory during active call, not stored)? YES
+   • Used for tracking purposes? NO
+
+5. DATA TRACKING:
+   • "Do you or your third-party partners use this data for tracking?"
+   • Answer: NO (Attest that you do not share data with data brokers or ad networks).
+
+--------------------------------------------------------------------------------
+6. EXPORT COMPLIANCE & ENCRYPTION
+--------------------------------------------------------------------------------
+
+Question: "Does your app use encryption?"
+Answer: YES
+
+Question: "Does your app qualify for an exemption under Category 5, Part 2 of the U.S. Export Administration Regulations?"
+Answer: YES (Standard HTTPS/TLS communications exemption).
+
+================================================================================
+END OF APPLE APP STORE SUBMISSION GUIDE
+================================================================================

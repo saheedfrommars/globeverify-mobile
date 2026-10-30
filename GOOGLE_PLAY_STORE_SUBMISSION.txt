@@ -1,0 +1,183 @@
+================================================================================
+GOOGLE PLAY STORE CONSOLE - COPY & PASTE SUBMISSION GUIDE
+Application: GlobeVerify (com.globeverify.app)
+================================================================================
+
+This document contains EXACT plain text answers and descriptions ready to copy 
+and paste directly into Google Play Console (play.google.com/console).
+
+--------------------------------------------------------------------------------
+1. STORE LISTING DETAILS
+--------------------------------------------------------------------------------
+
+[App Name] (Max 30 characters):
+GlobeVerify - SMS Verification
+
+[Short Description] (Max 80 characters):
+Fast virtual phone numbers and instant SMS verification from 150+ countries.
+
+[Full Description] (Max 4,000 characters):
+GlobeVerify provides fast, reliable, and secure virtual phone numbers from 150+ countries for SMS verification, business communications, and personal privacy.
+
+Whether you need a dedicated temporary number for signing up to online platforms or long-term private rentals, GlobeVerify delivers instant verification codes with 99.9% uptime.
+
+KEY FEATURES:
+• Global Coverage: Access real carrier non-VoIP and VoIP numbers across the USA, UK, Canada, Nigeria, Germany, France, and 150+ countries.
+• Instant Code Delivery: Real-time SMS and OTP reception with automated status tracking.
+• Multiple Pools & Providers: Choose between ultra-low-cost pools and premium telecom carriers for guaranteed compatibility.
+• Rental Numbers: Reserve private phone lines for 1 day, 7 days, 30 days, or longer to receive repeated verification codes and telecom voice calls.
+• Multiplatform Account: Unified balance that updates seamlessly across all your devices.
+• Privacy First: Auto-expiring SMS logs, zero data sharing, and end-to-end security for your peace of mind.
+• AI & Live Support: Integrated 24/7 intelligent assistance with our support team.
+
+Protect your personal phone number from spam, data leaks, and marketing lists. Get your private virtual number today with GlobeVerify.
+
+--------------------------------------------------------------------------------
+2. STORE SETTINGS & CONTACT DETAILS
+--------------------------------------------------------------------------------
+
+[App Category]:
+Communication (or Tools / Business)
+
+[Tags]:
+Communication, Productivity, Tools
+
+[Store Listing Contact Details]:
+• Email Address: support@globeverify.com
+• Phone Number: +234XXXXXXXXXX (Enter your international phone number e.g. +2348012345678)
+• Website: https://globeverify.com
+
+--------------------------------------------------------------------------------
+3. APP CONTENT & POLICY DECLARATIONS (APP CONTENT PAGE)
+--------------------------------------------------------------------------------
+
+[Privacy Policy]:
+URL: https://globeverify.com/privacy
+
+[App Access] (Restricted Access Declaration):
+Select: "All or some functionality is restricted"
+Click "Add new instructions":
+• Title: Test Reviewer Account
+• Username / Email: reviewer@globeverify.com
+• Password: GlobeVerify2026!
+• Explanation:
+  "This account is pre-configured with a test balance of $15.00 USD. Reviewers can log in immediately with 2FA disabled to test purchasing virtual numbers, receiving SMS verification codes, and viewing rentals."
+
+[Ads]:
+Select: "No, my app does not contain ads"
+
+[Content Rating] (IARC Questionnaire):
+• Category: Utility, Productivity, Communication or Other
+• Violence: NO
+• Sexuality: NO
+• Language / Profanity: NO
+• Controlled Substances: NO
+• Miscellaneous:
+  - Does the app allow users to interact or exchange content? NO (private account dashboard)
+  - Does the app share user physical location? NO
+  - Does the app purchase digital goods? YES (virtual telecom credits)
+Result: Rated for 3+ / Everyone (PEGI 3, ESRB Everyone)
+
+[Target Audience and Content]:
+• Target Age Group: 18 and over
+• Could the app appeal to children: NO
+
+[News Apps]:
+Select: "No"
+
+[COVID-19 Contact Tracing]:
+Select: "My app is not a publicly available COVID-19 app"
+
+[Data Safety Questionnaire] (See Section 4 below)
+
+[Advertising ID Declaration]:
+Select: "No, my app does not use the Advertising ID"
+
+[Government Apps]:
+Select: "No"
+
+[Financial Features]:
+Select: "My app doesn't provide any financial features" (Wallet balance is strictly internal telecom credits for purchasing phone lines)
+
+--------------------------------------------------------------------------------
+4. GOOGLE PLAY DATA SAFETY FORM (EXACT ANSWERS)
+--------------------------------------------------------------------------------
+
+High-Level Overview:
+1. Does your app collect or share any of the required user data types? -> YES
+2. Is all of the user data collected by your app encrypted in transit? -> YES
+3. Do you provide a way for users to request that their data is deleted? -> YES
+4. Account Deletion Web Link: https://globeverify.com/dashboard/settings
+
+Data Types Collected:
+
+1. Personal Info -> Name
+   • Is it collected? YES
+   • Is it shared? NO
+   • Is it processed transiently? NO
+   • Is it required? YES
+   • Purposes: App functionality, Account management
+
+2. Personal Info -> Email Address
+   • Is it collected? YES
+   • Is it shared? NO
+   • Is it processed transiently? NO
+   • Is it required? YES
+   • Purposes: App functionality, Account management
+
+3. Personal Info -> Phone Number (Optional, if added by user)
+   • Is it collected? YES
+   • Is it shared? NO
+   • Is it processed transiently? NO
+   • Is it required? NO (Optional)
+   • Purposes: Account management
+
+4. Financial Info -> Purchase History
+   • Is it collected? YES
+   • Is it shared? NO
+   • Is it processed transiently? NO
+   • Is it required? YES
+   • Purposes: App functionality (viewing transaction and number history)
+
+5. Audio Files -> Voice or Sound Recordings (Microphone)
+   • Is it collected? YES
+   • Is it shared? NO
+   • Is it processed transiently? YES (processed in real-time during VoIP phone calls, never saved to disk)
+   • Is it required? NO (Only active when placing an optional voice call)
+   • Purposes: App functionality
+
+6. Device or Other Identifiers -> Device Identifiers
+   • Is it collected? YES
+   • Is it shared? NO
+   • Is it processed transiently? NO
+   • Is it required? YES
+   • Purposes: App functionality (Push notifications), Fraud prevention & security
+
+Security Practices:
+• Data is encrypted in transit over secure HTTPS / TLS connections.
+• Users can request full deletion of their account and data directly inside the app under Settings.
+
+--------------------------------------------------------------------------------
+5. PRODUCTION RELEASE NOTES (en-US)
+--------------------------------------------------------------------------------
+
+Copy and paste into "Release notes":
+
+Initial release of GlobeVerify mobile.
+• Instant SMS verification codes and virtual phone numbers from 150+ countries.
+• Support for Non-VoIP and VoIP carriers across multiple telecom pools.
+• Flexible private line rentals for recurring verifications and calls.
+• Multiplatform balance sync and real-time order tracking.
+• 24/7 intelligent Vera AI and live human support assistance.
+
+--------------------------------------------------------------------------------
+6. NOTE ON 20 TESTERS (PERSONAL DEVELOPER ACCOUNTS ONLY)
+--------------------------------------------------------------------------------
+If your Google Play Developer Account was registered after November 13, 2023 
+as a "Personal Account" (not Organization):
+• Google requires you to run a Closed Test with at least 20 testers opted-in for 14 continuous days before you can publish to Production.
+• If you have an Organization account, you can submit directly to Production.
+
+================================================================================
+END OF GOOGLE PLAY STORE SUBMISSION GUIDE
+================================================================================
