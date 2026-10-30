@@ -132,6 +132,18 @@ const cleanMessage = (msg?: string): string => {
     .trim();
 };
 
+const timeAgo = (dateStr?: string): string => {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'Just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+};
+
 export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
   onBack,
   onNavigateToBuy,
@@ -144,6 +156,7 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
   const initialCachedNumbers = getMemoryCache<NumberItem[]>('my_numbers_list');
 
   const [numbers, setNumbers] = useState<NumberItem[]>(initialCachedNumbers || []);
+  const [pendingOrders, setPendingOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(!initialCachedNumbers);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
@@ -198,15 +211,22 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
     }, LOADING_TIMEOUT_MS);
 
     try {
-      const [numbersRes, cheapRes] = await Promise.allSettled([
+      const [numbersRes, cheapRes, pendingRes] = await Promise.allSettled([
         apiClient.get('/numbers/my-numbers', { timeout: 5000 }),
         apiClient.get('/cheap/my-numbers', { timeout: 5000 }),
+        apiClient.get('/numbers/pending', { timeout: 5000 }),
       ]);
 
       const anySuccess =
-        numbersRes.status === 'fulfilled' || cheapRes.status === 'fulfilled';
+        numbersRes.status === 'fulfilled' || cheapRes.status === 'fulfilled' || pendingRes.status === 'fulfilled';
       if (!anySuccess) {
         return;
+      }
+
+      if (pendingRes.status === 'fulfilled' && pendingRes.value.data?.success) {
+        setPendingOrders(Array.isArray(pendingRes.value.data.data) ? pendingRes.value.data.data : []);
+      } else {
+        setPendingOrders([]);
       }
 
       let allNumbers: NumberItem[] = [];
@@ -266,11 +286,13 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
     (n) => !['active', 'waiting'].includes((n.status || '').toLowerCase())
   );
 
+  const hasActiveItems = activeList.length > 0 || pendingOrders.length > 0;
+
   useEffect(() => {
-    if (!loading && activeList.length === 0 && historyList.length > 0 && activeTab === 'active') {
+    if (!loading && !hasActiveItems && historyList.length > 0 && activeTab === 'active') {
       setActiveTab('history');
     }
-  }, [loading, activeList.length, historyList.length, activeTab]);
+  }, [loading, hasActiveItems, historyList.length, activeTab]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -304,6 +326,33 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
     } finally {
       setActionLoadingId(null);
     }
+  };
+
+  const handleCancelPending = (orderId: string) => {
+    showDialog({
+      title: 'Cancel Queued Order?',
+      message: 'Are you sure you want to cancel your place in the queue? You will be instantly refunded.',
+      variant: 'danger',
+      confirmText: 'Cancel & Refund',
+      cancelText: 'Keep Waiting',
+      onConfirm: async () => {
+        setActionLoadingId(orderId);
+        try {
+          const res = await apiClient.post(`/numbers/pending/${orderId}/cancel`);
+          if (res.data?.success) {
+            triggerHaptic('success');
+            showToast('Queued order cancelled and refunded successfully', 'success');
+            await fetchNumbers();
+          } else {
+            showToast(res.data?.message || 'Failed to cancel queued order', 'error');
+          }
+        } catch (err: any) {
+          showToast(err?.response?.data?.message || 'Failed to cancel queued order', 'error');
+        } finally {
+          setActionLoadingId(null);
+        }
+      },
+    });
   };
 
   const handleCancelNumber = (numId: string, type?: string) => {
@@ -583,6 +632,73 @@ export const MyNumbersScreen: React.FC<MyNumbersScreenProps> = ({
           />
         ) : (
           <Animated.View style={{ opacity: fadeAnim, gap: 16 }}>
+            {/* ── PENDING ORDERS IN QUEUE (Matches web MyNumbersPage.tsx!) ── */}
+            {activeTab === 'active' && pendingOrders.length > 0 && (
+              <View style={{ gap: 12, marginBottom: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[s.sectionSubhead, { color: colors.textMuted }]}>
+                    PENDING ORDERS ({pendingOrders.length})
+                  </Text>
+                </View>
+                {pendingOrders.map((order) => {
+                  const oId = order._id || order.id;
+                  const isBusy = actionLoadingId === oId;
+                  return (
+                    <View
+                      key={oId}
+                      style={[
+                        s.modernNumberCard,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.isDark ? 'rgba(245, 158, 11, 0.4)' : 'rgba(245, 158, 11, 0.5)',
+                          borderStyle: 'dashed',
+                        },
+                      ]}
+                    >
+                      <View style={s.mncTop}>
+                        <View style={s.mncService}>
+                          <View style={[s.mncDot, { backgroundColor: '#F59E0B' }]} />
+                          <Text style={[s.mncServiceName, { color: colors.text }]}>
+                            {formatServiceName(order.serviceName, order.service)}
+                          </Text>
+                          <View style={[s.pendingBadgePill, { backgroundColor: colors.isDark ? '#1C160C' : '#FFFBEB' }]}>
+                            <Text style={s.pendingBadgeText}>PROCESSING</Text>
+                          </View>
+                        </View>
+                        <View style={[s.mncCountryPill, { backgroundColor: colors.bg }]}>
+                          <Text style={[s.mncCountryText, { color: colors.textMuted }]}>
+                            {(order.countryName || order.country || 'USA').toUpperCase()}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={{ paddingVertical: 4, gap: 4 }}>
+                        <Text style={[s.pendingDescText, { color: colors.textSecondary }]}>
+                          Order is in provider fulfillment queue. Waiting for an active phone number to be assigned.
+                        </Text>
+                        <Text style={[s.pendingTimeText, { color: colors.textMuted }]}>
+                          Queued {timeAgo(order.createdAt)}
+                        </Text>
+                      </View>
+
+                      <View style={[s.mncActionsRow, { borderTopColor: colors.border, borderTopWidth: 1 }]}>
+                        <TouchableOpacity
+                          style={[s.cancelOrderBtn, { borderColor: '#EF4444' }]}
+                          onPress={() => handleCancelPending(oId)}
+                          disabled={isBusy}
+                        >
+                          {isBusy ? (
+                            <ActivityIndicator size="small" color="#EF4444" />
+                          ) : (
+                            <Text style={s.cancelOrderBtnText}>Cancel & Refund</Text>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
             {displayedList.map((num) => {
               const numId = num.id || (num as any)._id || num.phoneNumber;
               const isPhoneCopied = copiedKey === `ph-${numId}`;
@@ -1111,5 +1227,46 @@ const s = StyleSheet.create({
     color: '#EF4444',
     fontSize: 13.5,
     fontWeight: '600',
+  },
+  sectionSubhead: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  pendingBadgePill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
+  pendingBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#F59E0B',
+  },
+  pendingDescText: {
+    fontSize: 12.5,
+    lineHeight: 16.5,
+  },
+  pendingTimeText: {
+    fontSize: 11.5,
+  },
+  mncActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingTop: 10,
+  },
+  cancelOrderBtn: {
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelOrderBtnText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

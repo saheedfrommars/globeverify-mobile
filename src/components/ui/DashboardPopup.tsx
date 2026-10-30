@@ -36,10 +36,10 @@ interface DashboardPopupProps {
 }
 
 const DEFAULT_PROMO_POPUP: PopupData = {
-  _id: 'default-cheap-usa-promo',
+  _id: '6ad2595a26c45458fd610c56',
   title: 'Cheap Services Now Available (USA Only)',
   content: 'Get up to 50% to 60% discount on your usual purchases.',
-  link: 'https://www.globeverify.com/dashboard/cheap',
+  link: '/dashboard/cheap',
   linkText: 'Tap to explore',
   type: 'promo',
 };
@@ -52,14 +52,9 @@ const ICON_MAP = {
   announcement: Megaphone,
 };
 
-// Session-level cache so navigating between tabs doesn't re-show a dismissed popup
 let cachedSessionPopup: PopupData | null = null;
 const dismissedPopupIds = new Set<string>();
 
-/**
- * Resolves any popup link to https://www.globeverify.com/... if relative,
- * or opens full http(s) URLs directly.
- */
 const resolvePopupRedirectUrl = (rawLink?: string): string => {
   const trimmed = (rawLink || '').trim();
   if (!trimmed) {
@@ -72,7 +67,7 @@ const resolvePopupRedirectUrl = (rawLink?: string): string => {
   return `https://www.globeverify.com${normalizedPath}`;
 };
 
-export const DashboardPopup: React.FC<DashboardPopupProps> = () => {
+export const DashboardPopup: React.FC<DashboardPopupProps> = ({ onNavigateToBuy }) => {
   const { user } = useAuth();
   const { settings, colors, triggerHaptic } = useAppSettings();
 
@@ -85,43 +80,36 @@ export const DashboardPopup: React.FC<DashboardPopupProps> = () => {
     return id ? dismissedPopupIds.has(id) : false;
   });
 
-  // Use a single consistent native driver for all transforms
   const translateY = useRef(new Animated.Value(cachedSessionPopup ? 0 : -20)).current;
   const translateX = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(cachedSessionPopup ? 1 : 0.97)).current;
   const opacity = useRef(new Animated.Value(cachedSessionPopup ? 1 : 0)).current;
 
   useEffect(() => {
-    if (!user) return;
-
     let mounted = true;
     const fetchPopup = async () => {
       try {
         const res = await apiClient.get('/notifications/popup');
         if (!mounted) return;
-        // Backend may return raw Mongoose doc where real fields are inside ._doc
         const raw = res.data?.popup;
         const doc: PopupData | null = raw ? (raw._doc ?? raw) : null;
 
         if (doc && doc.title) {
           cachedSessionPopup = doc;
           const popupKey = doc._id || doc.id || doc.title;
-          setDismissed(dismissedPopupIds.has(popupKey));
+          const isDismissed = dismissedPopupIds.has(popupKey);
+          setDismissed(isDismissed);
           setPopup(doc);
         } else {
-          cachedSessionPopup = DEFAULT_PROMO_POPUP;
-          const fallbackKey =
-            DEFAULT_PROMO_POPUP._id || DEFAULT_PROMO_POPUP.title;
-          setDismissed(dismissedPopupIds.has(fallbackKey));
-          setPopup(DEFAULT_PROMO_POPUP);
+          if (!cachedSessionPopup) {
+            setPopup(DEFAULT_PROMO_POPUP);
+          }
         }
       } catch {
         if (!mounted) return;
-        cachedSessionPopup = DEFAULT_PROMO_POPUP;
-        const fallbackKey =
-          DEFAULT_PROMO_POPUP._id || DEFAULT_PROMO_POPUP.title;
-        setDismissed(dismissedPopupIds.has(fallbackKey));
-        setPopup(DEFAULT_PROMO_POPUP);
+        if (!popup) {
+          setPopup(DEFAULT_PROMO_POPUP);
+        }
       }
     };
 
@@ -182,7 +170,6 @@ export const DashboardPopup: React.FC<DashboardPopupProps> = () => {
     });
   };
 
-  // Horizontal drag to dismiss — matches web `drag="x"` with `Math.abs(info.offset.x) > 50`
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gesture) =>
@@ -218,10 +205,8 @@ export const DashboardPopup: React.FC<DashboardPopupProps> = () => {
     return null;
   }
 
-  // Exact type colors & subtle 6% tinted surface matching frontend-globeverify/src/components/DashboardPopup.css
   const getTypeStyle = (type: PopupData['type']) => {
-    const primaryColor = colors.isDark ? '#3B82F6' : '#2563EB';
-    const accentColor = colors.isDark ? '#8B5CF6' : '#7C3AED';
+    const primaryColor = colors.primary;
 
     switch (type) {
       case 'warning':
@@ -232,9 +217,9 @@ export const DashboardPopup: React.FC<DashboardPopupProps> = () => {
         };
       case 'promo':
         return {
-          borderLeftColor: accentColor,
-          backgroundColor: colors.isDark ? '#171326' : '#F3F1FE',
-          iconColor: accentColor,
+          borderLeftColor: colors.primary,
+          backgroundColor: colors.isDark ? '#101827' : '#EFF6FF',
+          iconColor: colors.primary,
         };
       case 'success':
         return {
@@ -251,9 +236,9 @@ export const DashboardPopup: React.FC<DashboardPopupProps> = () => {
       case 'info':
       default:
         return {
-          borderLeftColor: primaryColor,
+          borderLeftColor: colors.primary,
           backgroundColor: colors.isDark ? '#101827' : '#EFF6FF',
-          iconColor: primaryColor,
+          iconColor: colors.primary,
         };
     }
   };
@@ -266,6 +251,16 @@ export const DashboardPopup: React.FC<DashboardPopupProps> = () => {
   const handleOpenLink = async () => {
     if (!hasLink) return;
     triggerHaptic('light');
+
+    const lower = cleanLink.toLowerCase();
+    // If it points to cheap numbers or buy numbers, navigate in-app!
+    if (lower.includes('cheap') || lower.includes('buy')) {
+      if (onNavigateToBuy) {
+        onNavigateToBuy();
+        return;
+      }
+    }
+
     const targetUrl = resolvePopupRedirectUrl(cleanLink);
     try {
       await Linking.openURL(targetUrl);
@@ -286,12 +281,10 @@ export const DashboardPopup: React.FC<DashboardPopupProps> = () => {
         },
       ]}
     >
-      {/* .popup-icon */}
       <View style={styles.popupIcon}>
         <Icon size={18} color={typeStyle.iconColor} strokeWidth={2} />
       </View>
 
-      {/* .popup-body */}
       <TouchableOpacity
         style={styles.popupBody}
         onPress={handleOpenLink}
@@ -313,14 +306,13 @@ export const DashboardPopup: React.FC<DashboardPopupProps> = () => {
         {hasLink && (
           <View style={styles.popupLink}>
             <Text style={[styles.popupLinkText, { color: colors.primary }]}>
-              {popup.linkText || 'Learn more'}
+              {popup.linkText || 'Tap to explore'}
             </Text>
             <ExternalLink size={12} color={colors.primary} strokeWidth={2.2} />
           </View>
         )}
       </TouchableOpacity>
 
-      {/* .popup-close */}
       <TouchableOpacity
         onPress={handleDismiss}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}

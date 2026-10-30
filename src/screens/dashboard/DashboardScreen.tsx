@@ -148,6 +148,28 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const fadeAnim = useRef(new Animated.Value(initialCache ? 1 : 0)).current;
   const slideAnim = useRef(new Animated.Value(initialCache ? 0 : 8)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (stats.pendingOrders > 0) {
+      const pulseLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.4,
+            duration: 900,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 900,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseLoop.start();
+      return () => pulseLoop.stop();
+    }
+  }, [stats.pendingOrders, pulseAnim]);
 
   useEffect(() => {
     if (!initialCache) {
@@ -401,6 +423,65 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         >
           {/* ── 1. DYNAMIC WEB POPUP (Matches frontend-globeverify DashboardPopup.tsx!) ── */}
           <DashboardPopup onNavigateToBuy={onNavigateToBuy} />
+
+          {/* ── PENDING ORDERS PROCESSING POPUP / ALERT (Matches web DashboardHome.tsx) ── */}
+          {stats.pendingOrders > 0 && (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                triggerHaptic('light');
+                onNavigateToNumbers?.();
+              }}
+              style={[
+                s.processingAlert,
+                {
+                  backgroundColor: colors.isDark ? '#1C160C' : '#FFFBEB',
+                  borderColor: colors.isDark ? 'rgba(245, 158, 11, 0.3)' : 'rgba(245, 158, 11, 0.4)',
+                },
+              ]}
+            >
+              <View style={s.pulseDotWrapper}>
+                <Animated.View
+                  style={[
+                    s.pulsingHalo,
+                    {
+                      transform: [{ scale: pulseAnim }],
+                      opacity: pulseAnim.interpolate({
+                        inputRange: [1, 1.4],
+                        outputRange: [0.6, 0],
+                      }),
+                    },
+                  ]}
+                />
+                <View style={s.pulsingDot} />
+              </View>
+
+              <View style={s.processingContent}>
+                <Text style={s.processingTitle}>Processing Orders</Text>
+                <Text style={[s.processingDesc, { color: colors.textSecondary }]}>
+                  You have{' '}
+                  <Text style={{ fontWeight: '700', color: colors.text }}>
+                    {stats.pendingOrders}
+                  </Text>{' '}
+                  order{stats.pendingOrders > 1 ? 's' : ''} currently being processed.
+                </Text>
+              </View>
+
+              <View
+                style={[
+                  s.viewStatusBtn,
+                  {
+                    backgroundColor: colors.isDark
+                      ? 'rgba(245, 158, 11, 0.15)'
+                      : 'rgba(245, 158, 11, 0.12)',
+                  },
+                ]}
+              >
+                <Text style={s.viewStatusText}>View Status</Text>
+                <ChevronRight size={13} color="#F59E0B" strokeWidth={2.5} />
+              </View>
+            </TouchableOpacity>
+          )}
 
           {/* ── 2. WELCOME HEADING ──────────────────────────────────────────── */}
           {settings.showDashboardGreeting && (
@@ -1099,5 +1180,60 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  processingAlert: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  pulseDotWrapper: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pulsingHalo: {
+    position: 'absolute',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(245, 158, 11, 0.6)',
+  },
+  pulsingDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    backgroundColor: '#F59E0B',
+  },
+  processingContent: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  processingTitle: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#F59E0B',
+  },
+  processingDesc: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  viewStatusBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  viewStatusText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#F59E0B',
   },
 });
