@@ -126,7 +126,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const [loading, setLoading] = useState(!initialCache);
   const [refreshing, setRefreshing] = useState(false);
-  const [period, setPeriod] = useState<'7' | '30' | '90' | 'all'>('30');
+  const [period, setPeriod] = useState<'7' | '30' | '90'>('30');
   const [stats, setStats] = useState<DashboardStats>(
     initialCache?.stats || {
       activeNumbers: 0,
@@ -389,7 +389,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     else if (tab === 'more') onNavigateToMore?.();
   };
 
-  const periodLabel = period === 'all' ? 'All Time' : `${period}d`;
+  const periodLabel = `${period}d`;
   const balanceHidden = settings.privacyHideBalance;
 
   return (
@@ -674,7 +674,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                       { key: '7', label: '7d' },
                       { key: '30', label: '30d' },
                       { key: '90', label: '90d' },
-                      { key: 'all', label: 'All' },
                     ] as const
                   ).map((item) => {
                     const active = period === item.key;

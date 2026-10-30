@@ -30,7 +30,6 @@ import {
   ShieldCheck,
   Globe,
   Bot,
-  Sparkles,
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
@@ -533,7 +532,7 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[s.iosNoticeTitle, { color: colors.text }]}>
-                      Wallet Top-Up & Sync
+                      Wallet Top-Up
                     </Text>
                     <Text
                       style={[s.iosNoticeSubtitle, { color: colors.textMuted }]}
@@ -546,8 +545,7 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
                 <Text style={[s.iosNoticeBody, { color: colors.textMuted }]}>
                   To fund your account wallet, please complete your deposit via
                   the GlobeVerify web platform or official Telegram bot. Any
-                  balance added synchronizes instantly with your account on
-                  iPhone.
+                  balance added reflects on your account on iPhone.
                 </Text>
 
                 <View
@@ -576,20 +574,6 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
                       style={[s.iosNoticeFeatureText, { color: colors.text }]}
                     >
                       Telegram Bot
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      s.iosNoticeFeatureDivider,
-                      { backgroundColor: colors.border },
-                    ]}
-                  />
-                  <View style={s.iosNoticeFeatureItem}>
-                    <Sparkles size={15} color="#10B981" />
-                    <Text
-                      style={[s.iosNoticeFeatureText, { color: colors.text }]}
-                    >
-                      Realtime Sync
                     </Text>
                   </View>
                 </View>
