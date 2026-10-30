@@ -129,8 +129,37 @@ If you have any questions or require additional test configurations, please cont
 [Contact Information]:
 First Name: Saheed
 Last Name: Suleiman
-Phone Number: +234XXXXXXXXXX (Enter your international phone number e.g. +2348012345678)
-Email Address: support@globeverify.com
+Phone Number: +2349113595476
+Email Address: saheed@globeverify.com (Alternate: support@globeverify.com / saheedsuleiman4955@gmail.com)
+
+--------------------------------------------------------------------------------
+4B. REQUIRED STORE IMAGES & SCREENSHOT SPECIFICATIONS (APPLE)
+--------------------------------------------------------------------------------
+
+1. App Store Icon:
+   • Dimensions: 1024 x 1024 pixels
+   • Format: PNG, RGB color space, 72 dpi
+   • Requirements: Flat artwork, NO alpha transparency, NO rounded corners (Apple applies corner radius automatically).
+
+2. 6.9-inch iPhone Screenshots (iPhone 16 Pro Max):
+   • Dimensions: 1320 x 2868 pixels (Portrait)
+   • Quantity: At least 3 (up to 10)
+   • Format: PNG or high-quality JPEG
+   • Screens to capture:
+     1. Dashboard Home (Wallet balance, quick actions)
+     2. Buy Number Screen (Service picker, country selection)
+     3. Active SMS / Orders Screen (Incoming SMS with OTP code)
+     4. Rentals Screen (Long-term leased lines)
+
+3. 6.7-inch iPhone Screenshots (iPhone 15 Pro Max / 14 Pro Max / Plus):
+   • Dimensions: 1290 x 2796 pixels (Portrait)
+   • Quantity: At least 3 (up to 10)
+
+4. 6.5-inch iPhone Screenshots (iPhone 11 Pro Max / XS Max / 8 Plus):
+   • Dimensions: 1242 x 2688 pixels (or 1284 x 2778 pixels)
+
+5. iPad Pro (13-inch & 12.9-inch) Screenshots (Only if "supportsTablet: true" is enabled):
+   • Dimensions: 2048 x 2732 pixels (Portrait)
 
 --------------------------------------------------------------------------------
 5. APP PRIVACY (NUTRITION LABEL) QUESTIONNAIRE ANSWERS

@@ -43,9 +43,39 @@ Communication (or Tools / Business)
 Communication, Productivity, Tools
 
 [Store Listing Contact Details]:
-• Email Address: support@globeverify.com
-• Phone Number: +234XXXXXXXXXX (Enter your international phone number e.g. +2348012345678)
+• Email Address: support@globeverify.com (or saheed@globeverify.com / saheedsuleiman4955@gmail.com)
+• Phone Number: +2349113595476
 • Website: https://globeverify.com
+
+--------------------------------------------------------------------------------
+2B. REQUIRED GRAPHIC ASSETS & SCREENSHOTS (GOOGLE PLAY)
+--------------------------------------------------------------------------------
+
+1. App Icon:
+   • Dimensions: 512 x 512 pixels
+   • Format: 32-bit PNG (with alpha)
+   • Max file size: 1 MB
+   • Use: Official square icon (Google rounds the corners automatically).
+
+2. Feature Graphic (Banner at the top of your Store listing):
+   • Dimensions: 1024 x 500 pixels
+   • Format: JPEG or 24-bit PNG (NO transparency)
+   • Max file size: 1 MB
+   • Tip: A sleek dark-themed banner with the GlobeVerify logo emblem and text "Global SMS Verification & Virtual Phone Lines".
+
+3. Phone Screenshots (Mandatory):
+   • Dimensions: Between 320 px and 3840 px (Recommended: 1080 x 1920 px or 1080 x 2400 px, 16:9 or 9:16 aspect ratio)
+   • Quantity: Minimum 2 screenshots, maximum 8 screenshots
+   • Format: JPEG or 24-bit PNG (no alpha)
+   • Up to 8 MB each
+   • Recommended screens to show:
+     1. Dashboard (Balance overview, services)
+     2. Buy Number (Country list with flags, service list)
+     3. Active Numbers & Real-Time OTP delivery
+     4. Number Rentals (VoIP and Non-VoIP tabs)
+
+4. 7-inch & 10-inch Tablet Screenshots (Optional):
+   • Dimensions: 1200 x 1920 px (or similar 16:10 / 16:9)
 
 --------------------------------------------------------------------------------
 3. APP CONTENT & POLICY DECLARATIONS (APP CONTENT PAGE)
