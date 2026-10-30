@@ -35,7 +35,12 @@ import {
   ShieldCheck,
   Lock,
   ChevronRight,
+  CheckCircle2,
+  Zap,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
 import { useAppSettings } from '../../context/WalletSettingsContext';
 import { useCall } from '../../context/CallContext';
@@ -47,7 +52,7 @@ import { ModernHeader } from '../../components/navigation/ModernHeader';
 import { ModernBottomNav, NavTabId } from '../../components/navigation/ModernBottomNav';
 
 const PAD = 16;
-const LOADING_TIMEOUT_MS = 2500;
+const LOADING_TIMEOUT_MS = 15000;
 
 export interface ActiveRental {
   id: string;
@@ -138,12 +143,42 @@ const NON_VOIP_CATEGORIES = [
   { id: 'all', label: 'All Services' },
   { id: 'full', label: '★ Full Access' },
   { id: 'whatsapp', label: 'WhatsApp' },
-  { id: 'telegram', label: 'Telegram' },
-  { id: 'google', label: 'Google' },
   { id: 'cash app', label: 'Cash App' },
-  { id: 'tinder', label: 'Tinder' },
+  { id: 'telegram', label: 'Telegram' },
+  { id: 'google', label: 'Google / Gmail' },
+  { id: 'paypal', label: 'PayPal' },
+  { id: 'coinbase', label: 'Crypto & Coinbase' },
+  { id: 'apple', label: 'Apple / iCloud' },
+  { id: 'tinder', label: 'Tinder & Dating' },
   { id: 'instagram', label: 'Instagram' },
 ];
+
+const getServiceBrand = (serviceName: string, isFullAccess?: boolean) => {
+  if (isFullAccess) {
+    return { color: '#EAB308', bg: 'rgba(234, 179, 8, 0.15)', label: 'Universal' };
+  }
+  const name = (serviceName || '').toLowerCase();
+  if (name.includes('whatsapp')) return { color: '#25D366', bg: 'rgba(37, 211, 102, 0.15)', label: 'WA' };
+  if (name.includes('telegram')) return { color: '#0088CC', bg: 'rgba(0, 136, 204, 0.15)', label: 'TG' };
+  if (name.includes('cash')) return { color: '#00D632', bg: 'rgba(0, 214, 50, 0.15)', label: '$' };
+  if (name.includes('google') || name.includes('gmail') || name.includes('youtube')) return { color: '#EA4335', bg: 'rgba(234, 67, 53, 0.15)', label: 'G' };
+  if (name.includes('paypal')) return { color: '#003087', bg: 'rgba(0, 48, 135, 0.15)', label: 'PP' };
+  if (name.includes('apple') || name.includes('icloud')) return { color: '#8E8E93', bg: 'rgba(142, 142, 147, 0.15)', label: 'AP' };
+  if (name.includes('coinbase') || name.includes('crypto') || name.includes('binance')) return { color: '#0052FF', bg: 'rgba(0, 82, 255, 0.15)', label: '₿' };
+  if (name.includes('instagram')) return { color: '#E4405F', bg: 'rgba(228, 64, 95, 0.15)', label: 'IG' };
+  if (name.includes('tiktok')) return { color: '#FE2C55', bg: 'rgba(254, 44, 85, 0.15)', label: 'TT' };
+  if (name.includes('tinder') || name.includes('bumble') || name.includes('hinge')) return { color: '#FE3C72', bg: 'rgba(254, 60, 114, 0.15)', label: 'TD' };
+  return { color: '#6366F1', bg: 'rgba(99, 102, 241, 0.15)', label: (serviceName || 'SIM').slice(0, 2).toUpperCase() };
+};
+
+const formatPhoneNumber = (numStr?: string) => {
+  if (!numStr) return '';
+  const cleaned = numStr.replace(/\D/g, '');
+  if (cleaned.length === 11 && cleaned.startsWith('1')) {
+    return `+1 (${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
+  }
+  return numStr;
+};
 
 const daysLeft = (expiresAt: string) => {
   const diff = new Date(expiresAt).getTime() - Date.now();
@@ -782,32 +817,43 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
 
   const displayCurrency = user?.currency?.toUpperCase() === 'NGN' ? 'NGN' : 'USD';
 
-  const fetchActiveRentals = useCallback(async () => {
-    const timeoutId = setTimeout(() => {
-      setLoading(false);
-    }, LOADING_TIMEOUT_MS);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
 
+  const fetchActiveRentals = useCallback(async () => {
     try {
       const res = await apiClient.get('/numbers/my-numbers?type=rental', {
-        timeout: LOADING_TIMEOUT_MS,
+        timeout: 10000,
       });
       const list = Array.isArray(res.data?.data) ? res.data.data : [];
       setActiveRentals(list);
     } catch {
       setActiveRentals([]);
     } finally {
-      clearTimeout(timeoutId);
       setLoading(false);
     }
   }, []);
 
   const fetchCatalog = useCallback(
-    async (currentLineType: 'non_voip' | 'voip', countryCode: string) => {
+    async (currentLineType: 'non_voip' | 'voip', countryCode: string, isManual = false) => {
       setLoadingCatalog(true);
-      const timeoutId = setTimeout(() => {
-        setLoadingCatalog(false);
-      }, LOADING_TIMEOUT_MS);
+      setCatalogError(null);
 
+      const cacheKey = `gv_catalog_cache_${currentLineType}_${currentLineType === 'voip' ? countryCode : 'US'}_${displayCurrency}`;
+
+      // 1. Immediately hydrate with cached data if available and not a manual refresh
+      if (!isManual) {
+        try {
+          const cached = await AsyncStorage.getItem(cacheKey);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setAvailableNumbers(parsed);
+            }
+          }
+        } catch {}
+      }
+
+      // 2. Fetch live real-time inventory from backend
       try {
         const res = await apiClient.get('/numbers/rentals/options', {
           params: {
@@ -815,97 +861,39 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
             currency: displayCurrency,
             lineType: currentLineType,
           },
-          timeout: LOADING_TIMEOUT_MS,
+          timeout: 15000,
         });
+
         const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
-        const normalized: AvailableRentalItem[] = data.map((item: any) => ({
-          ...item,
-          lineType: currentLineType,
-          monthlyFee:
-            item.pricing?.[30] ||
-            item.monthlyFee ||
-            (displayCurrency === 'NGN'
-              ? currentLineType === 'non_voip'
-                ? 12000
-                : 9800
-              : currentLineType === 'non_voip'
-              ? 8.5
-              : 6.5),
-        }));
-        setAvailableNumbers(normalized);
-      } catch {
-        if (currentLineType === 'non_voip') {
-          setAvailableNumbers([
-            {
-              serviceId: 0,
-              service: 'full',
-              serviceName: 'Full Rent (Any Service)',
-              isFullAccess: true,
-              lineType: 'non_voip',
-              available: 30,
-              monthlyFee: displayCurrency === 'NGN' ? 18000 : 12.0,
-            },
-            {
-              serviceId: 1,
-              service: 'wa',
-              serviceName: 'WhatsApp',
-              isFullAccess: false,
-              lineType: 'non_voip',
-              available: 45,
-              monthlyFee: displayCurrency === 'NGN' ? 13000 : 8.5,
-            },
-            {
-              serviceId: 2,
-              service: 'tg',
-              serviceName: 'Telegram',
-              isFullAccess: false,
-              lineType: 'non_voip',
-              available: 35,
-              monthlyFee: displayCurrency === 'NGN' ? 13000 : 8.5,
-            },
-            {
-              serviceId: 3,
-              service: 'go',
-              serviceName: 'Google / YouTube',
-              isFullAccess: false,
-              lineType: 'non_voip',
-              available: 50,
-              monthlyFee: displayCurrency === 'NGN' ? 13000 : 8.5,
-            },
-            {
-              serviceId: 4,
-              service: 'ca',
-              serviceName: 'Cash App',
-              isFullAccess: false,
-              lineType: 'non_voip',
-              available: 20,
-              monthlyFee: displayCurrency === 'NGN' ? 14000 : 9.0,
-            },
-          ]);
+        if (Array.isArray(data) && data.length > 0) {
+          const normalized: AvailableRentalItem[] = data.map((item: any) => ({
+            ...item,
+            lineType: currentLineType,
+            monthlyFee:
+              item.pricing?.[30] ||
+              item.monthlyFee ||
+              (displayCurrency === 'NGN'
+                ? currentLineType === 'non_voip' ? 15000 : 9800
+                : currentLineType === 'non_voip' ? 10.0 : 6.5),
+          }));
+          setAvailableNumbers(normalized);
+
+          // Save to local offline cache
+          try {
+            await AsyncStorage.setItem(cacheKey, JSON.stringify(normalized));
+          } catch {}
         } else {
-          setAvailableNumbers([
-            {
-              phoneNumber: '+1 302 589 4412',
-              region: 'Delaware, US',
-              lineType: 'voip',
-              monthlyFee: displayCurrency === 'NGN' ? 9800 : 6.5,
-            },
-            {
-              phoneNumber: '+1 415 890 1204',
-              region: 'California, US',
-              lineType: 'voip',
-              monthlyFee: displayCurrency === 'NGN' ? 9800 : 6.5,
-            },
-            {
-              phoneNumber: '+1 646 320 9981',
-              region: 'New York, US',
-              lineType: 'voip',
-              monthlyFee: displayCurrency === 'NGN' ? 9800 : 6.5,
-            },
-          ]);
+          setAvailableNumbers([]);
         }
+      } catch (err: any) {
+        console.warn('[Rentals Catalog] Live fetch error:', err?.message);
+        setAvailableNumbers((prev) => {
+          if (prev.length === 0) {
+            setCatalogError('Could not load live inventory. Please check your network and tap to retry.');
+          }
+          return prev;
+        });
       } finally {
-        clearTimeout(timeoutId);
         setLoadingCatalog(false);
       }
     },
@@ -927,7 +915,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
     triggerHaptic('light');
     await Promise.all([
       fetchActiveRentals(),
-      fetchCatalog(lineType, selectedCountry.code),
+      fetchCatalog(lineType, selectedCountry.code, true),
       refreshUser(),
     ]);
     setRefreshing(false);
@@ -1047,6 +1035,36 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
 
     if (selectedCategory === 'full') {
       items = items.filter((i) => i.isFullAccess);
+    } else if (selectedCategory === 'whatsapp') {
+      items = items.filter((i) => (i.serviceName || i.service || '').toLowerCase().includes('whatsapp'));
+    } else if (selectedCategory === 'cash app') {
+      items = items.filter((i) => (i.serviceName || i.service || '').toLowerCase().includes('cash'));
+    } else if (selectedCategory === 'telegram') {
+      items = items.filter((i) => (i.serviceName || i.service || '').toLowerCase().includes('telegram'));
+    } else if (selectedCategory === 'google') {
+      items = items.filter((i) => {
+        const text = (i.serviceName || i.service || '').toLowerCase();
+        return text.includes('google') || text.includes('gmail') || text.includes('youtube');
+      });
+    } else if (selectedCategory === 'paypal') {
+      items = items.filter((i) => (i.serviceName || i.service || '').toLowerCase().includes('paypal'));
+    } else if (selectedCategory === 'coinbase') {
+      items = items.filter((i) => {
+        const text = (i.serviceName || i.service || '').toLowerCase();
+        return text.includes('coinbase') || text.includes('crypto') || text.includes('binance');
+      });
+    } else if (selectedCategory === 'apple') {
+      items = items.filter((i) => {
+        const text = (i.serviceName || i.service || '').toLowerCase();
+        return text.includes('apple') || text.includes('icloud');
+      });
+    } else if (selectedCategory === 'tinder') {
+      items = items.filter((i) => {
+        const text = (i.serviceName || i.service || '').toLowerCase();
+        return text.includes('tinder') || text.includes('bumble') || text.includes('hinge');
+      });
+    } else if (selectedCategory === 'instagram') {
+      items = items.filter((i) => (i.serviceName || i.service || '').toLowerCase().includes('instagram'));
     } else if (selectedCategory !== 'all') {
       items = items.filter((i) =>
         (i.serviceName || i.service || '').toLowerCase().includes(selectedCategory.toLowerCase())
@@ -1342,12 +1360,12 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
               </View>
             )
           ) : (
-            <View style={{ gap: 14 }}>
-              {/* ── LINE TYPE SELECTOR (NON-VOIP VS VOIP) ───────────────────── */}
-              <View style={s.lineTypeRow}>
-                {/* Non-VoIP Card */}
+            <View style={{ gap: 16 }}>
+              {/* ── LINE TYPE SELECTOR: STACKED (NON-VOIP ON TOP, VOIP BELOW) ── */}
+              <View style={s.lineTypeStack}>
+                {/* 1. NON-VOIP PHYSICAL SIM (TOP) */}
                 <TouchableOpacity
-                  activeOpacity={0.85}
+                  activeOpacity={0.88}
                   onPress={() => {
                     triggerHaptic('selection');
                     setLineType('non_voip');
@@ -1355,101 +1373,203 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                     setSelectedCategory('all');
                   }}
                   style={[
-                    s.lineTypeCard,
+                    s.stackedLineCard,
                     {
                       backgroundColor:
                         lineType === 'non_voip'
-                          ? colors.primarySoft
+                          ? (colors.isDark ? '#0F2318' : '#F0FDF4')
                           : colors.surface,
                       borderColor:
-                        lineType === 'non_voip' ? colors.primary : colors.border,
+                        lineType === 'non_voip' ? '#16A34A' : colors.border,
                     },
+                    lineType === 'non_voip' && s.stackedLineCardActive,
                   ]}
                 >
-                  <View
-                    style={[
-                      s.lineTypeIconWrap,
-                      {
-                        backgroundColor:
-                          lineType === 'non_voip' ? colors.primary : colors.border,
-                      },
-                    ]}
-                  >
-                    <Smartphone size={17} color="#FFFFFF" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                      <Text style={[s.lineTypeTitle, { color: colors.text }]}>
-                        Non-VoIP
-                      </Text>
-                      <View style={[s.miniBadge, { backgroundColor: colors.primarySoft }]}>
-                        <Text style={[s.miniBadgeText, { color: colors.primary }]}>
-                          Physical SIM
+                  <View style={s.stackedCardInner}>
+                    <View
+                      style={[
+                        s.stackedCardIconBox,
+                        {
+                          backgroundColor:
+                            lineType === 'non_voip'
+                              ? '#16A34A'
+                              : (colors.isDark ? '#27272A' : '#F4F4F5'),
+                        },
+                      ]}
+                    >
+                      <Smartphone
+                        size={22}
+                        color={lineType === 'non_voip' ? '#FFFFFF' : colors.textMuted}
+                      />
+                    </View>
+
+                    <View style={{ flex: 1, gap: 4 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <Text style={[s.stackedCardTitle, { color: colors.text }]}>
+                          Non-VoIP Physical SIM
                         </Text>
+                        <View
+                          style={[
+                            s.pillBadge,
+                            {
+                              backgroundColor:
+                                lineType === 'non_voip'
+                                  ? 'rgba(22, 163, 74, 0.18)'
+                                  : colors.primarySoft,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              s.pillBadgeText,
+                              { color: lineType === 'non_voip' ? '#16A34A' : colors.primary },
+                            ]}
+                          >
+                            Carrier SIM
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text style={[s.stackedCardDesc, { color: colors.textSecondary }]}>
+                        Real US mobile carrier SIMs. Guaranteed for WhatsApp, Cash App, Telegram & Banking OTPs.
+                      </Text>
+
+                      <View style={s.stackedCardTagsRow}>
+                        <View style={s.tagBubble}>
+                          <ShieldCheck size={11} color="#16A34A" />
+                          <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>Physical Lines</Text>
+                        </View>
+                        <View style={s.tagBubble}>
+                          <Zap size={11} color="#16A34A" />
+                          <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>Instant OTP</Text>
+                        </View>
+                        <View style={s.tagBubble}>
+                          <Clock size={11} color="#16A34A" />
+                          <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>30-Day Lease</Text>
+                        </View>
                       </View>
                     </View>
-                    <Text
-                      style={[s.lineTypeSubtitle, { color: colors.textMuted }]}
-                      numberOfLines={1}
-                    >
-                      Carrier SIMs · Receive OTPs
-                    </Text>
+
+                    <View style={s.stackedRadioWrap}>
+                      <View
+                        style={[
+                          s.radioCircle,
+                          { borderColor: lineType === 'non_voip' ? '#16A34A' : colors.border },
+                          lineType === 'non_voip' && { backgroundColor: '#16A34A' },
+                        ]}
+                      >
+                        {lineType === 'non_voip' && (
+                          <Check size={13} color="#FFFFFF" strokeWidth={3} />
+                        )}
+                      </View>
+                    </View>
                   </View>
                 </TouchableOpacity>
 
-                {/* VoIP Card */}
+                {/* 2. VOIP LEASED LINES (BELOW) */}
                 <TouchableOpacity
-                  activeOpacity={0.85}
+                  activeOpacity={0.88}
                   onPress={() => {
                     triggerHaptic('selection');
                     setLineType('voip');
                     setServiceSearch('');
                   }}
                   style={[
-                    s.lineTypeCard,
+                    s.stackedLineCard,
                     {
                       backgroundColor:
                         lineType === 'voip'
-                          ? colors.primarySoft
+                          ? (colors.isDark ? '#0D1E36' : '#EFF6FF')
                           : colors.surface,
                       borderColor:
-                        lineType === 'voip' ? colors.primary : colors.border,
+                        lineType === 'voip' ? '#2563EB' : colors.border,
                     },
+                    lineType === 'voip' && s.stackedLineCardActive,
                   ]}
                 >
-                  <View
-                    style={[
-                      s.lineTypeIconWrap,
-                      {
-                        backgroundColor:
-                          lineType === 'voip' ? colors.primary : colors.border,
-                      },
-                    ]}
-                  >
-                    <Phone size={17} color="#FFFFFF" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                      <Text style={[s.lineTypeTitle, { color: colors.text }]}>
-                        VoIP Lines
-                      </Text>
-                      <View style={[s.miniBadge, { backgroundColor: colors.primarySoft }]}>
-                        <Text style={[s.miniBadgeText, { color: colors.primary }]}>
-                          Calls + SMS
+                  <View style={s.stackedCardInner}>
+                    <View
+                      style={[
+                        s.stackedCardIconBox,
+                        {
+                          backgroundColor:
+                            lineType === 'voip'
+                              ? '#2563EB'
+                              : (colors.isDark ? '#27272A' : '#F4F4F5'),
+                        },
+                      ]}
+                    >
+                      <Phone
+                        size={22}
+                        color={lineType === 'voip' ? '#FFFFFF' : colors.textMuted}
+                      />
+                    </View>
+
+                    <View style={{ flex: 1, gap: 4 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <Text style={[s.stackedCardTitle, { color: colors.text }]}>
+                          VoIP Leased Lines (Telnyx)
                         </Text>
+                        <View
+                          style={[
+                            s.pillBadge,
+                            {
+                              backgroundColor:
+                                lineType === 'voip'
+                                  ? 'rgba(37, 99, 235, 0.18)'
+                                  : colors.primarySoft,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              s.pillBadgeText,
+                              { color: lineType === 'voip' ? '#2563EB' : colors.primary },
+                            ]}
+                          >
+                            Calls + SMS
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text style={[s.stackedCardDesc, { color: colors.textSecondary }]}>
+                        Dedicated private virtual phone number with crystal-clear voice calls, in-app dialpad & 2-way SMS.
+                      </Text>
+
+                      <View style={s.stackedCardTagsRow}>
+                        <View style={s.tagBubble}>
+                          <Phone size={11} color="#2563EB" />
+                          <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>Voice Calling</Text>
+                        </View>
+                        <View style={s.tagBubble}>
+                          <MessageSquare size={11} color="#2563EB" />
+                          <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>2-Way SMS</Text>
+                        </View>
+                        <View style={s.tagBubble}>
+                          <Globe size={11} color="#2563EB" />
+                          <Text style={[s.tagBubbleText, { color: colors.textSecondary }]}>Dialpad Ready</Text>
+                        </View>
                       </View>
                     </View>
-                    <Text
-                      style={[s.lineTypeSubtitle, { color: colors.textMuted }]}
-                      numberOfLines={1}
-                    >
-                      Full virtual leased lines
-                    </Text>
+
+                    <View style={s.stackedRadioWrap}>
+                      <View
+                        style={[
+                          s.radioCircle,
+                          { borderColor: lineType === 'voip' ? '#2563EB' : colors.border },
+                          lineType === 'voip' && { backgroundColor: '#2563EB' },
+                        ]}
+                      >
+                        {lineType === 'voip' && (
+                          <Check size={13} color="#FFFFFF" strokeWidth={3} />
+                        )}
+                      </View>
+                    </View>
                   </View>
                 </TouchableOpacity>
               </View>
 
-              {/* ── SUB-FILTERS ─────────────────────────────────────────────── */}
+              {/* ── SUB-FILTERS (SEARCH & CATEGORIES FOR NON-VOIP / COUNTRY FOR VOIP) ── */}
               {lineType === 'non_voip' ? (
                 <View style={{ gap: 10 }}>
                   {/* Search Bar */}
@@ -1459,10 +1579,10 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                       { backgroundColor: colors.surface, borderColor: colors.border },
                     ]}
                   >
-                    <Search size={16} color={colors.textMuted} />
+                    <Search size={17} color={colors.textMuted} />
                     <TextInput
                       style={[s.searchInput, { color: colors.text }]}
-                      placeholder="Search service (e.g. WhatsApp, Full, Telegram)..."
+                      placeholder="Search 2,000+ services (WhatsApp, Cash App, Full)..."
                       placeholderTextColor={colors.textMuted}
                       value={serviceSearch}
                       onChangeText={setServiceSearch}
@@ -1478,7 +1598,7 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                     )}
                   </View>
 
-                  {/* Categories Chips */}
+                  {/* Horizontal Categories */}
                   <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
@@ -1497,16 +1617,16 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                             s.categoryChip,
                             {
                               backgroundColor: isActive
-                                ? colors.primarySoft
+                                ? (colors.isDark ? '#0F2318' : '#F0FDF4')
                                 : colors.surface,
-                              borderColor: isActive ? colors.primary : colors.border,
+                              borderColor: isActive ? '#16A34A' : colors.border,
                             },
                           ]}
                         >
                           <Text
                             style={[
                               s.categoryChipText,
-                              { color: isActive ? colors.primary : colors.textSecondary },
+                              { color: isActive ? '#16A34A' : colors.textSecondary },
                             ]}
                           >
                             {cat.label}
@@ -1518,207 +1638,206 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                 </View>
               ) : (
                 /* Country Chips for VoIP */
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 8 }}
-                >
-                  {RENTAL_COUNTRIES.map((c) => {
-                    const active = selectedCountry.code === c.code;
-                    return (
-                      <TouchableOpacity
-                        key={c.code}
-                        onPress={() => {
-                          triggerHaptic('selection');
-                          setSelectedCountry(c);
-                        }}
-                        style={[
-                          s.countryChip,
-                          {
-                            backgroundColor: active
-                              ? colors.primarySoft
-                              : colors.surface,
-                            borderColor: active ? colors.primary : colors.border,
-                          },
-                        ]}
-                      >
-                        <Text style={{ fontSize: 15 }}>{c.flag}</Text>
-                        <Text
+                <View style={{ gap: 8 }}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 8 }}
+                  >
+                    {RENTAL_COUNTRIES.map((c) => {
+                      const active = selectedCountry.code === c.code;
+                      return (
+                        <TouchableOpacity
+                          key={c.code}
+                          onPress={() => {
+                            triggerHaptic('selection');
+                            setSelectedCountry(c);
+                          }}
                           style={[
-                            s.countryChipText,
-                            { color: active ? colors.primary : colors.textSecondary },
+                            s.countryChip,
+                            {
+                              backgroundColor: active
+                                ? (colors.isDark ? '#0D1E36' : '#EFF6FF')
+                                : colors.surface,
+                              borderColor: active ? '#2563EB' : colors.border,
+                            },
                           ]}
                         >
-                          {c.name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+                          <Text style={{ fontSize: 16 }}>{c.flag}</Text>
+                          <Text
+                            style={[
+                              s.countryChipText,
+                              { color: active ? '#2563EB' : colors.textSecondary },
+                            ]}
+                          >
+                            {c.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
               )}
 
-              {/* ── CATALOG ITEMS ────────────────────────────────────────────── */}
-              {loadingCatalog ? (
-                <View style={{ gap: 10 }}>
+              {/* ── HEADER SUMMARY ROW: COUNT & REFRESH ── */}
+              <View style={s.catalogHeaderRow}>
+                <Text style={[s.catalogCountText, { color: colors.textSecondary }]}>
+                  {lineType === 'non_voip'
+                    ? `${filteredCatalog.length.toLocaleString()} Physical Services Available`
+                    : `${filteredCatalog.length} Leased Numbers Ready in ${selectedCountry.name}`}
+                </Text>
+
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => fetchCatalog(lineType, selectedCountry.code, true)}
+                  disabled={loadingCatalog}
+                  style={s.catalogRefreshBtn}
+                >
+                  <RefreshCw
+                    size={13}
+                    color={colors.primary}
+                    style={loadingCatalog ? { transform: [{ rotate: '45deg' }] } : {}}
+                  />
+                  <Text style={[s.catalogRefreshText, { color: colors.primary }]}>
+                    {loadingCatalog ? 'Updating...' : 'Refresh'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* ── CATALOG ITEMS ── */}
+              {loadingCatalog && availableNumbers.length === 0 ? (
+                <View style={{ gap: 12 }}>
                   <SkeletonListItem />
                   <SkeletonListItem />
                   <SkeletonListItem />
+                </View>
+              ) : catalogError && availableNumbers.length === 0 ? (
+                <View style={[s.errorCardWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <AlertCircle size={28} color="#EF4444" />
+                  <Text style={[s.errorCardTitle, { color: colors.text }]}>Could not load live inventory</Text>
+                  <Text style={[s.errorCardSubtitle, { color: colors.textMuted }]}>{catalogError}</Text>
+                  <TouchableOpacity
+                    style={[s.retryButton, { backgroundColor: colors.primary }]}
+                    onPress={() => fetchCatalog(lineType, selectedCountry.code, true)}
+                  >
+                    <RefreshCw size={14} color="#FFFFFF" />
+                    <Text style={s.retryButtonText}>Tap to Retry</Text>
+                  </TouchableOpacity>
                 </View>
               ) : filteredCatalog.length === 0 ? (
                 <View style={s.emptyCatalogWrap}>
                   <Text style={[s.emptyCatalogTitle, { color: colors.text }]}>
                     {lineType === 'non_voip'
-                      ? 'No physical SIM services found'
-                      : 'No VoIP numbers available'}
+                      ? 'No services matching your search'
+                      : 'No VoIP numbers available in this region'}
                   </Text>
                   <Text style={[s.emptyCatalogSubtitle, { color: colors.textMuted }]}>
                     {lineType === 'non_voip'
-                      ? 'Try searching for another service name or tap All Services.'
-                      : 'Try switching to another country or refresh the list.'}
+                      ? 'Try searching for another service name or switch category to "All Services".'
+                      : 'Try switching to another country or check back shortly.'}
                   </Text>
+                  {serviceSearch.length > 0 && (
+                    <TouchableOpacity
+                      style={[s.clearSearchBtn, { borderColor: colors.border }]}
+                      onPress={() => setServiceSearch('')}
+                    >
+                      <Text style={[s.clearSearchBtnText, { color: colors.primary }]}>Clear Search</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ) : (
-                <View
-                  style={[
-                    s.flatListSurface,
-                    { backgroundColor: colors.surface, borderColor: colors.border },
-                  ]}
-                >
+                <View style={{ gap: 12 }}>
                   {lineType === 'non_voip'
-                    ? filteredCatalog.map((item, idx) => {
-                        const fee =
-                          item.monthlyFee ||
-                          (displayCurrency === 'NGN' ? 13000 : 8.5);
+                    ? filteredCatalog.slice(0, serviceSearch ? 150 : 80).map((item, idx) => {
+                        const fee = item.monthlyFee || (displayCurrency === 'NGN' ? 15000 : 10.0);
                         const busy = purchasingKey === String(item.serviceId);
+                        const brand = getServiceBrand(item.serviceName || item.service || '', item.isFullAccess);
 
                         return (
                           <View
                             key={item.serviceId ?? idx}
                             style={[
-                              s.serviceRow,
-                              idx > 0 && {
-                                borderTopWidth: 1,
-                                borderTopColor: colors.border,
+                              s.premiumCard,
+                              {
+                                backgroundColor: item.isFullAccess
+                                  ? (colors.isDark ? '#231F10' : '#FEFCE8')
+                                  : colors.surface,
+                                borderColor: item.isFullAccess
+                                  ? '#EAB308'
+                                  : colors.border,
                               },
+                              item.isFullAccess && s.fullAccessCardGlow,
                             ]}
                           >
-                            <View style={s.serviceRowTop}>
-                              <View style={s.serviceRowLeft}>
-                                <View
-                                  style={[
-                                    s.serviceIconBox,
-                                    {
-                                      backgroundColor: item.isFullAccess
-                                        ? 'rgba(234, 179, 8, 0.15)'
-                                        : colors.primarySoft,
-                                    },
-                                  ]}
-                                >
+                            <View style={s.cardTopRow}>
+                              <View style={s.cardBrandBox}>
+                                <View style={[s.brandIconBadge, { backgroundColor: brand.bg }]}>
                                   {item.isFullAccess ? (
-                                    <Sparkles size={16} color="#EAB308" />
+                                    <Sparkles size={18} color="#EAB308" />
                                   ) : (
-                                    <Smartphone size={16} color={colors.primary} />
+                                    <Text style={[s.brandInitials, { color: brand.color }]}>
+                                      {brand.label}
+                                    </Text>
                                   )}
                                 </View>
-                                <View style={{ flex: 1 }}>
+
+                                <View style={{ flex: 1, gap: 2 }}>
                                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                    <Text
-                                      style={[s.serviceTitleText, { color: colors.text }]}
-                                    >
+                                    <Text style={[s.serviceTitleText, { color: colors.text }]}>
                                       {item.serviceName || item.service}
                                     </Text>
                                     {item.isFullAccess ? (
                                       <View style={s.goldBadge}>
-                                        <Text style={s.goldBadgeText}>★ Full Access</Text>
+                                        <Text style={s.goldBadgeText}>★ Universal Access</Text>
                                       </View>
-                                    ) : item.available !== undefined ? (
-                                      <View
-                                        style={[
-                                          s.stockBadge,
-                                          { backgroundColor: colors.primarySoft },
-                                        ]}
-                                      >
-                                        <Text
-                                          style={[
-                                            s.stockBadgeText,
-                                            { color: colors.primary },
-                                          ]}
-                                        >
-                                          {item.available} in stock
+                                    ) : (
+                                      <View style={[s.stockBadge, { backgroundColor: 'rgba(22, 163, 74, 0.12)' }]}>
+                                        <View style={s.liveGreenDot} />
+                                        <Text style={[s.stockBadgeText, { color: '#16A34A' }]}>
+                                          {item.available !== undefined ? `${item.available} in stock` : 'Active'}
                                         </Text>
                                       </View>
-                                    ) : null}
+                                    )}
                                   </View>
-                                  <Text
-                                    style={{
-                                      fontSize: 12,
-                                      color: colors.textMuted,
-                                      marginTop: 2,
-                                    }}
-                                  >
+
+                                  <Text style={[s.serviceDescText, { color: colors.textSecondary }]}>
                                     {item.isFullAccess
-                                      ? 'Works for ANY service or verification app'
-                                      : 'Dedicated Physical SIM for this specific service'}
+                                      ? 'Universal SIM · Works for WhatsApp, Cash App, PayPal & ANY app'
+                                      : 'Dedicated physical mobile carrier SIM for this specific service'}
                                   </Text>
                                 </View>
                               </View>
                             </View>
 
-                            {/* Badges Row */}
+                            {/* Tags Row */}
                             <View style={s.chipsRow}>
-                              <View
-                                style={[
-                                  s.featurePill,
-                                  { backgroundColor: colors.primarySoft },
-                                ]}
-                              >
-                                <ShieldCheck size={11} color={colors.primary} />
-                                <Text
-                                  style={[s.featurePillText, { color: colors.primary }]}
-                                >
-                                  Physical SIM
-                                </Text>
+                              <View style={[s.featurePill, { backgroundColor: 'rgba(22, 163, 74, 0.12)' }]}>
+                                <ShieldCheck size={11} color="#16A34A" />
+                                <Text style={[s.featurePillText, { color: '#16A34A' }]}>Physical SIM</Text>
                               </View>
-
                               <View style={s.featurePillMuted}>
                                 <MessageSquare size={11} color={colors.textMuted} />
-                                <Text
-                                  style={[
-                                    s.featurePillTextMuted,
-                                    { color: colors.textMuted },
-                                  ]}
-                                >
-                                  SMS Verification
-                                </Text>
+                                <Text style={[s.featurePillTextMuted, { color: colors.textMuted }]}>SMS Verification</Text>
                               </View>
-
                               <View style={s.featurePillMuted}>
                                 <Clock size={11} color={colors.textMuted} />
-                                <Text
-                                  style={[
-                                    s.featurePillTextMuted,
-                                    { color: colors.textMuted },
-                                  ]}
-                                >
-                                  30-Day Rolling
-                                </Text>
+                                <Text style={[s.featurePillTextMuted, { color: colors.textMuted }]}>30-Day Rolling</Text>
                               </View>
                             </View>
 
-                            {/* Bottom Price & Rent Button */}
-                            <View style={s.serviceBottomRow}>
+                            {/* Bottom Row */}
+                            <View style={[s.serviceBottomRow, { borderTopColor: colors.border, borderTopWidth: 1 }]}>
                               <View>
                                 <Text style={[s.priceMain, { color: colors.text }]}>
                                   {formatCurrency(fee, displayCurrency)}
                                 </Text>
-                                <Text style={[s.priceSub, { color: colors.textMuted }]}>
-                                  for 30 days
-                                </Text>
+                                <Text style={[s.priceSub, { color: colors.textMuted }]}>for 30 days</Text>
                               </View>
 
                               <TouchableOpacity
                                 style={[
                                   s.rentBtn,
+                                  item.isFullAccess && { backgroundColor: '#CA8A04' },
                                   busy && { opacity: 0.7 },
                                 ]}
                                 onPress={() => handleRentNumber(item)}
@@ -1727,7 +1846,12 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                                 {busy ? (
                                   <ActivityIndicator size="small" color="#FFFFFF" />
                                 ) : (
-                                  <Text style={s.rentBtnText}>Rent Service</Text>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Text style={s.rentBtnText}>
+                                      {item.isFullAccess ? 'Rent Universal SIM' : 'Rent Service'}
+                                    </Text>
+                                    <ChevronRight size={14} color="#FFFFFF" />
+                                  </View>
                                 )}
                               </TouchableOpacity>
                             </View>
@@ -1735,48 +1859,95 @@ export const RentalsScreen: React.FC<RentalsScreenProps> = ({
                         );
                       })
                     : filteredCatalog.map((item, idx) => {
-                        const fee =
-                          item.monthlyFee ||
-                          (displayCurrency === 'NGN' ? 9800 : 6.5);
+                        const fee = item.monthlyFee || (displayCurrency === 'NGN' ? 9800 : 6.5);
                         const busy = purchasingKey === String(item.phoneNumber);
+                        const formattedPhone = formatPhoneNumber(item.phoneNumber);
 
                         return (
                           <View
                             key={item.phoneNumber ?? idx}
                             style={[
-                              s.flatRow,
-                              idx > 0 && {
-                                borderTopWidth: 1,
-                                borderTopColor: colors.border,
-                              },
+                              s.premiumCard,
+                              { backgroundColor: colors.surface, borderColor: colors.border },
                             ]}
                           >
-                            <Phone size={17} color={colors.primary} />
-                            <View style={{ flex: 1, marginLeft: 12, gap: 2 }}>
-                              <Text style={[s.rentalPhone, { color: colors.text }]}>
-                                {item.phoneNumber}
-                              </Text>
-                              <Text style={{ fontSize: 12, color: colors.textMuted }}>
-                                {item.region || `${selectedCountry.name} · 30 Days`}
-                              </Text>
+                            <View style={s.cardTopRow}>
+                              <View style={s.cardBrandBox}>
+                                <View style={[s.brandIconBadge, { backgroundColor: 'rgba(37, 99, 235, 0.15)' }]}>
+                                  <Phone size={18} color="#2563EB" />
+                                </View>
+
+                                <View style={{ flex: 1, gap: 2 }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                    <Text style={[s.phoneTitleText, { color: colors.text }]}>
+                                      {formattedPhone || item.phoneNumber}
+                                    </Text>
+                                    <View style={[s.stockBadge, { backgroundColor: 'rgba(37, 99, 235, 0.12)' }]}>
+                                      <View style={[s.liveGreenDot, { backgroundColor: '#2563EB' }]} />
+                                      <Text style={[s.stockBadgeText, { color: '#2563EB' }]}>
+                                        {selectedCountry.flag} {item.region || selectedCountry.name}
+                                      </Text>
+                                    </View>
+                                  </View>
+
+                                  <Text style={[s.serviceDescText, { color: colors.textSecondary }]}>
+                                    Private leased virtual number with in-app keypad & crystal-clear voice
+                                  </Text>
+                                </View>
+                              </View>
                             </View>
 
-                            <TouchableOpacity
-                              style={s.rentBtn}
-                              onPress={() => handleRentNumber(item)}
-                              disabled={busy}
-                            >
-                              {busy ? (
-                                <ActivityIndicator size="small" color="#FFFFFF" />
-                              ) : (
-                                <Text style={s.rentBtnText}>
-                                  Rent · {formatCurrency(fee, displayCurrency)}
+                            {/* Features row */}
+                            <View style={s.chipsRow}>
+                              <View style={[s.featurePill, { backgroundColor: 'rgba(37, 99, 235, 0.12)' }]}>
+                                <Phone size={11} color="#2563EB" />
+                                <Text style={[s.featurePillText, { color: '#2563EB' }]}>HD Voice Calling</Text>
+                              </View>
+                              <View style={[s.featurePill, { backgroundColor: 'rgba(37, 99, 235, 0.12)' }]}>
+                                <MessageSquare size={11} color="#2563EB" />
+                                <Text style={[s.featurePillText, { color: '#2563EB' }]}>2-Way SMS Threads</Text>
+                              </View>
+                              <View style={s.featurePillMuted}>
+                                <Globe size={11} color={colors.textMuted} />
+                                <Text style={[s.featurePillTextMuted, { color: colors.textMuted }]}>Dialpad Ready</Text>
+                              </View>
+                            </View>
+
+                            {/* Bottom Row */}
+                            <View style={[s.serviceBottomRow, { borderTopColor: colors.border, borderTopWidth: 1 }]}>
+                              <View>
+                                <Text style={[s.priceMain, { color: colors.text }]}>
+                                  {formatCurrency(fee, displayCurrency)}
                                 </Text>
-                              )}
-                            </TouchableOpacity>
+                                <Text style={[s.priceSub, { color: colors.textMuted }]}>for 30 days</Text>
+                              </View>
+
+                              <TouchableOpacity
+                                style={[s.rentBtn, { backgroundColor: '#2563EB' }, busy && { opacity: 0.7 }]}
+                                onPress={() => handleRentNumber(item)}
+                                disabled={busy}
+                              >
+                                {busy ? (
+                                  <ActivityIndicator size="small" color="#FFFFFF" />
+                                ) : (
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Text style={s.rentBtnText}>Lease Number</Text>
+                                    <ChevronRight size={14} color="#FFFFFF" />
+                                  </View>
+                                )}
+                              </TouchableOpacity>
+                            </View>
                           </View>
                         );
                       })}
+
+                  {lineType === 'non_voip' && filteredCatalog.length > 80 && !serviceSearch && (
+                    <View style={[s.moreServicesNote, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[s.moreServicesNoteText, { color: colors.textMuted }]}>
+                        Showing top 80 of {filteredCatalog.length.toLocaleString()} physical services. Use search above to find any specific app.
+                      </Text>
+                    </View>
+                  )}
                 </View>
               )}
             </View>
@@ -1836,33 +2007,211 @@ const s = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '700',
   },
-  lineTypeRow: {
-    flexDirection: 'row',
-    gap: 10,
+  // ─── STACKED LINE TYPE SELECTOR STYLES ───
+  lineTypeStack: {
+    flexDirection: 'column',
+    gap: 12,
   },
-  lineTypeCard: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 12,
-    borderRadius: 14,
+  stackedLineCard: {
+    width: '100%',
+    borderRadius: 16,
     borderWidth: 1.5,
+    padding: 14,
   },
-  lineTypeIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
+  stackedLineCardActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  stackedCardInner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  stackedCardIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  lineTypeTitle: {
-    fontSize: 14.5,
+  stackedCardTitle: {
+    fontSize: 15.5,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  pillBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+  },
+  pillBadgeText: {
+    fontSize: 10.5,
     fontWeight: '800',
   },
-  lineTypeSubtitle: {
-    fontSize: 11.5,
-    marginTop: 2,
+  stackedCardDesc: {
+    fontSize: 12,
+    lineHeight: 16.5,
+  },
+  stackedCardTagsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  tagBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
+    backgroundColor: 'rgba(150, 150, 150, 0.08)',
+  },
+  tagBubbleText: {
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
+  stackedRadioWrap: {
+    paddingTop: 2,
+  },
+  radioCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  catalogHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+    paddingTop: 4,
+  },
+  catalogCountText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  catalogRefreshBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  catalogRefreshText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  errorCardWrap: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 24,
+    alignItems: 'center',
+    gap: 10,
+    marginVertical: 12,
+  },
+  errorCardTitle: {
+    fontSize: 15.5,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  errorCardSubtitle: {
+    fontSize: 12.5,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 10,
+    marginTop: 6,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  clearSearchBtn: {
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  clearSearchBtnText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  premiumCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+    gap: 12,
+  },
+  fullAccessCardGlow: {
+    shadowColor: '#EAB308',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  cardBrandBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  brandIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandInitials: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  liveGreenDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#16A34A',
+  },
+  phoneTitleText: {
+    fontSize: 16.5,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  serviceDescText: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  moreServicesNote: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  moreServicesNoteText: {
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 17,
   },
   miniBadge: {
     paddingHorizontal: 6,
