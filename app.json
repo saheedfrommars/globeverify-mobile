@@ -15,7 +15,8 @@
         "applinks:www.globeverify.com"
       ],
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "GlobeVerify requires microphone access to place and receive telecom voice calls with your leased numbers."
+        "NSMicrophoneUsageDescription": "GlobeVerify requires microphone access to place and receive telecom voice calls with your leased numbers.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
