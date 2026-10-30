@@ -51,7 +51,6 @@ class RealtimeSocketService {
     }
 
     const backendUrl = this.getBackendUrl();
-    console.log(`[Socket] Initializing connection to ${backendUrl} for user: ${userId}`);
 
     // In React Native / mobile, native WebSockets connect faster and bypass XHR polling CORS issues
     this.socket = io(backendUrl, {
@@ -69,7 +68,6 @@ class RealtimeSocketService {
     });
 
     this.socket.on('connect', () => {
-      console.log(`[Socket] Successfully connected! ID: ${this.socket?.id}`);
       if (this.currentUserId && this.socket) {
         this.socket.emit('identify', this.currentUserId);
       }
@@ -80,11 +78,9 @@ class RealtimeSocketService {
     });
 
     this.socket.on('disconnect', (reason: string) => {
-      console.log(`[Socket] Disconnected: ${reason}`);
     });
 
     this.socket.io.on('reconnect', (attempt: number) => {
-      console.log(`[Socket] Reconnected after ${attempt} attempts`);
       if (this.currentUserId && this.socket) {
         this.socket.emit('identify', this.currentUserId);
       }
@@ -106,7 +102,6 @@ class RealtimeSocketService {
 
     events.forEach((evt) => {
       this.socket?.on(evt, (payload: any) => {
-        console.log(`[Socket] Received event: ${evt}`, payload);
         const set = this.listeners.get(evt);
         if (set) {
           set.forEach((cb) => {

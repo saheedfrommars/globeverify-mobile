@@ -30,7 +30,6 @@ try {
     });
   }
 } catch (err) {
-  console.log('[PushService] setNotificationHandler skipped in current environment:', err);
 }
 
 export interface PushRegistrationResult {
@@ -152,7 +151,6 @@ export async function setupAndroidNotificationChannel() {
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
     } catch (err) {
-      console.log('[PushService] setupAndroidNotificationChannel notice:', err);
     }
   }
 }
@@ -165,7 +163,6 @@ export async function registerForPushNotificationsAsync(): Promise<PushRegistrat
     await setupAndroidNotificationChannel();
 
     if (!Device.isDevice) {
-      console.log('[PushService] Must use a physical device for push notifications');
       return { success: false, error: 'Must use a physical device for Push Notifications' };
     }
 
@@ -178,7 +175,6 @@ export async function registerForPushNotificationsAsync(): Promise<PushRegistrat
     }
 
     if (finalStatus !== 'granted') {
-      console.log('[PushService] Notification permission not granted');
       await AsyncStorage.setItem(PUSH_ENABLED_STORAGE_KEY, 'false');
       return { success: false, error: 'Permission not granted' };
     }
@@ -207,7 +203,6 @@ export async function registerForPushNotificationsAsync(): Promise<PushRegistrat
     await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, expoPushToken);
     await AsyncStorage.setItem(PUSH_ENABLED_STORAGE_KEY, 'true');
 
-    console.log('[PushService] Push notifications registered successfully:', expoPushToken);
     return { success: true, token: expoPushToken };
   } catch (error: any) {
     console.warn('[PushService] Registration error:', error?.response?.data || error.message);
@@ -330,7 +325,6 @@ export function setupNotificationResponseListener(
       } catch {}
     };
   } catch (err) {
-    console.log('[PushService] setupNotificationResponseListener skipped:', err);
     return () => {};
   }
 }
